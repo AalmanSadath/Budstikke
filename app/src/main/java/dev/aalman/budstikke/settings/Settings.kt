@@ -22,7 +22,12 @@ data class Settings(
     val accent: Int? = null,
     /** The SIM new messages go out on, or INVALID_SUBSCRIPTION_ID for the system's default. */
     val defaultSubscriptionId: Int = SubscriptionManager.INVALID_SUBSCRIPTION_ID,
+    /** Seconds a sent message waits, and can be cancelled, before it goes out; 0 for none. */
+    val sendDelaySeconds: Int = 0,
 )
+
+/** The send delays Settings offers, in seconds. */
+val SEND_DELAYS = listOf(0, 3, 5, 10, 30)
 
 /**
  * The app's settings, kept in its private preferences on this device. Every screen reads
@@ -43,6 +48,7 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean(KEY_TRUE_BLACK, next.trueBlack)
             if (next.accent != null) putInt(KEY_ACCENT, next.accent) else remove(KEY_ACCENT)
             putInt(KEY_SUBSCRIPTION, next.defaultSubscriptionId)
+            putInt(KEY_SEND_DELAY, next.sendDelaySeconds)
         }
         state.value = next
     }
@@ -55,6 +61,8 @@ class SettingsRepository private constructor(context: Context) {
             trueBlack = prefs.getBoolean(KEY_TRUE_BLACK, defaults.trueBlack),
             accent = if (prefs.contains(KEY_ACCENT)) prefs.getInt(KEY_ACCENT, 0) else null,
             defaultSubscriptionId = prefs.getInt(KEY_SUBSCRIPTION, defaults.defaultSubscriptionId),
+            sendDelaySeconds = prefs.getInt(KEY_SEND_DELAY, defaults.sendDelaySeconds)
+                .takeIf { it in SEND_DELAYS } ?: defaults.sendDelaySeconds,
         )
     }
 
@@ -67,6 +75,7 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_TRUE_BLACK = "true_black"
         private const val KEY_ACCENT = "accent"
         private const val KEY_SUBSCRIPTION = "default_subscription"
+        private const val KEY_SEND_DELAY = "send_delay_seconds"
 
         @Volatile
         private var instance: SettingsRepository? = null

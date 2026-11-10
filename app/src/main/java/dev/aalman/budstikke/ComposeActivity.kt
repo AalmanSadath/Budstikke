@@ -34,7 +34,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import dev.aalman.budstikke.settings.SettingsRepository
-import dev.aalman.budstikke.sms.SmsSender
+import dev.aalman.budstikke.sms.OutgoingQueue
 import dev.aalman.budstikke.sms.activeSims
 import dev.aalman.budstikke.sms.bodyOf
 import dev.aalman.budstikke.sms.parseRecipients
@@ -70,7 +70,6 @@ class ComposeActivity : ComponentActivity() {
             ?: bodyOf(ssp)
             ?: ""
         val sims = activeSims(this)
-        val sender = SmsSender(this)
 
         setContent {
             BudstikkeTheme {
@@ -109,7 +108,7 @@ class ComposeActivity : ComponentActivity() {
                             val recipients = parseRecipients(to)
                             val text = body.trim()
                             if (recipients.isNotEmpty() && text.isNotEmpty()) {
-                                send(sender, recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                                send(recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
                             }
                         },
                         modifier = Modifier.navigationBarsPadding(),
@@ -119,10 +118,15 @@ class ComposeActivity : ComponentActivity() {
         }
     }
 
-    private fun send(sender: SmsSender, recipients: List<String>, text: String, subscriptionId: Int) {
+    private fun send(recipients: List<String>, text: String, subscriptionId: Int) {
         lifecycleScope.launch {
             val thread = withContext(Dispatchers.IO) {
-                recipients.forEach { sender.send(it, text, subscriptionId) }
+                // Each recipient gets their own conversation, which shows the send delay's
+                // countdown when one is set.
+                recipients.forEach { recipient ->
+                    val thread = Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, recipient)
+                    OutgoingQueue.sendOrHold(this@ComposeActivity, thread, recipient, text, subscriptionId)
+                }
                 recipients.singleOrNull()?.let { Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, it) }
             }
             startActivity(

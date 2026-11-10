@@ -19,6 +19,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import dev.aalman.budstikke.data.PendingMessage
 import androidx.compose.foundation.layout.width
@@ -130,8 +133,8 @@ fun ConversationScreen(
             val wasAtBottom = listState.firstVisibleItemIndex <= 1
             if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
         }
-        // A newly scheduled message is added below the rest the same way, out of sight
-        // below the list's place; bring it into view.
+        // A message just held back by the send delay, or just scheduled, is added below the
+        // rest the same way; bring it into view.
         val newestPending = pending.maxOfOrNull { it.id }
         LaunchedEffect(newestPending) {
             if (newestPending != null) listState.animateScrollToItem(0)
@@ -189,6 +192,10 @@ enum class PendingAction { SendNow, ChangeTime, Edit, Cancel }
  */
 @Composable
 private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, PendingAction) -> Unit) {
+    if (message.delayed) {
+        DelayedBubble(message) { onAction(message, PendingAction.Edit) }
+        return
+    }
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val time = messageTime(context, message.sendAtMillis)
@@ -242,6 +249,43 @@ private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, Pe
         }
     }
 }
+
+/**
+ * A message held back by the send delay: a faded outgoing bubble with a countdown to when
+ * it goes and a Cancel button, which puts the text back in the field.
+ */
+@Composable
+private fun DelayedBubble(message: PendingMessage, onCancel: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val now by produceState(System.currentTimeMillis(), message.sendAtMillis) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(200)
+        }
+    }
+    val label = stringResource(R.string.sending_in, secondsLeft(message.sendAtMillis, now))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.End) {
+            Text(
+                message.body,
+                Modifier
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
+                    .background(colors.primary.copy(alpha = 0.45f))
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                fontSize = 16.sp,
+                color = colors.onPrimary,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.padding(start = 6.dp), fontSize = 11.sp, color = colors.onSurfaceVariant)
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+        }
+    }
+}
+
+/** Whole seconds until [sendAtMillis], rounded up so the count reaches 1 before it goes, never below 0. */
+internal fun secondsLeft(sendAtMillis: Long, nowMillis: Long): Int =
+    ((sendAtMillis - nowMillis + 999) / 1000).coerceAtLeast(0).toInt()
 
 /** Names the SIM a message came in on, only when there is more than one to tell apart. */
 private fun List<Sim>.labelFor(message: Message): String? =

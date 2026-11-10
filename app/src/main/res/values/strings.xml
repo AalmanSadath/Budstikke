@@ -134,4 +134,9 @@
     <string name="scheduled_empty">No scheduled messages</string>
     <string name="scheduled_hint">Messages waiting to go out, soonest first</string>
     <string name="scheduled_message">Scheduled message to %1$s, %2$s: %3$s</string>
+    <string name="settings_send_delay">Send delay</string>
+    <string name="settings_send_delay_off">Off</string>
+    <string name="settings_send_delay_hint">A sent message waits this long first, with a countdown and Cancel, so a mistake can be caught. Replies from a notification go at once.</string>
+    <string name="seconds_short">%1$d s</string>
+    <string name="sending_in">Sending in %1$d s</string>
 </resources>

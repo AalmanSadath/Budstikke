@@ -38,3 +38,23 @@ class ScheduleTimeTest {
         assertEquals(expected, nextFullHour(now, sydney))
     }
 }
+
+class SecondsLeftTest {
+
+    @Test
+    fun roundsUpPartSeconds() {
+        org.junit.Assert.assertEquals(5, secondsLeft(10_000, 5_001))
+        org.junit.Assert.assertEquals(1, secondsLeft(10_000, 9_999))
+    }
+
+    @Test
+    fun exactSecondsStayExact() {
+        org.junit.Assert.assertEquals(3, secondsLeft(10_000, 7_000))
+    }
+
+    @Test
+    fun neverBelowZero() {
+        org.junit.Assert.assertEquals(0, secondsLeft(10_000, 10_000))
+        org.junit.Assert.assertEquals(0, secondsLeft(10_000, 12_000))
+    }
+}

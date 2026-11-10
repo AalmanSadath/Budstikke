@@ -8,6 +8,12 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import dev.aalman.budstikke.data.Outgoing
+import dev.aalman.budstikke.settings.SettingsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.concurrent.thread
 
 /**
@@ -21,10 +27,40 @@ object OutgoingQueue {
     private const val TAG = "OutgoingQueue"
     const val ACTION_SEND_DUE = "dev.aalman.budstikke.SEND_DUE"
 
+    /**
+     * Sends a message typed in the app: at once, or held back for the send delay set in
+     * Settings, during which the conversation shows a countdown and Cancel.
+     */
+    fun sendOrHold(context: Context, threadId: Long, address: String, body: String, subscriptionId: Int) {
+        val delaySeconds = SettingsRepository.get(context).settings.value.sendDelaySeconds
+        if (delaySeconds <= 0) {
+            SmsSender(context).send(address, body, subscriptionId)
+            return
+        }
+        val sendAt = System.currentTimeMillis() + delaySeconds * 1000L
+        val id = Outgoing.get(context).add(threadId, address, body, subscriptionId, sendAt, delayed = true)
+        sendWhenDue(context, id, sendAt)
+    }
+
     /** Sends one message now, if nothing else has sent or cancelled it. */
     fun sendNow(context: Context, id: Long) {
         val message = Outgoing.get(context).claim(id) ?: return
         SmsSender(context).send(message.address, message.body, message.subscriptionId)
+    }
+
+    private val timers = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Sends a held-back message when its delay ends, from inside the app so it goes on the
+     * second the countdown shows. The alarm stays set as a fallback if the app is closed
+     * first; whichever claims it first sends it.
+     */
+    fun sendWhenDue(context: Context, id: Long, sendAtMillis: Long) {
+        val app = context.applicationContext
+        timers.launch {
+            delay((sendAtMillis - System.currentTimeMillis()).coerceAtLeast(0))
+            sendNow(app, id)
+        }
     }
 
     /** Sends everything whose time has come, including what fell due while the phone was off. */

@@ -385,7 +385,9 @@ private fun ConversationRoute(
             if (body.isNotEmpty()) {
                 text = ""
                 val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                scope.launch(Dispatchers.IO) { sender.send(thread.address, body, subscription) }
+                scope.launch(Dispatchers.IO) {
+                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
+                }
             }
         },
         onRetry = { message -> scope.launch(Dispatchers.IO) { sender.retry(message.id) } },
