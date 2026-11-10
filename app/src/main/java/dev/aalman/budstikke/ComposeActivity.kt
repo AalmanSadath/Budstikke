@@ -26,6 +26,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.aalman.budstikke.ui.clearFocusOnTap
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -95,7 +97,8 @@ class ComposeActivity : ComponentActivity() {
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
                     )
-                    Box(Modifier.weight(1f))
+                    // The empty space between the fields; tapping it takes the cursor away.
+                    Box(Modifier.weight(1f).fillMaxWidth().clearFocusOnTap(LocalFocusManager.current))
                     ComposeBar(
                         text = body,
                         onTextChange = { body = it },

@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -129,8 +130,12 @@ fun ConversationScreen(
             val wasAtBottom = listState.firstVisibleItemIndex <= 1
             if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
         }
+        val focusManager = LocalFocusManager.current
         LazyColumn(
-            Modifier.weight(1f).fillMaxWidth(),
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clearFocusOnTap(focusManager),
             state = listState,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
