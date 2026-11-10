@@ -20,6 +20,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
+import dev.aalman.budstikke.data.PendingMessage
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.graphics.Color
@@ -71,6 +76,9 @@ fun ConversationScreen(
     onDeleteConversation: () -> Unit,
     blocked: Boolean,
     onBlockChange: (Boolean) -> Unit,
+    pending: List<PendingMessage>,
+    onPendingAction: (PendingMessage, PendingAction) -> Unit,
+    onSchedule: () -> Unit,
     onBack: () -> Unit,
 ) {
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
@@ -128,6 +136,10 @@ fun ConversationScreen(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Messages still waiting to go out sit below the sent ones, soonest nearest them.
+            items(pending.asReversed(), key = { "pending:${it.id}" }) { message ->
+                PendingBubble(message, onPendingAction)
+            }
             items(messages.asReversed(), key = { it.id }) { message ->
                 val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
                 Bubble(
@@ -152,7 +164,71 @@ fun ConversationScreen(
             onSimChange = onSimChange,
             onSend = onSend,
             modifier = Modifier.navigationBarsPadding(),
+            onSchedule = onSchedule,
         )
+    }
+}
+
+/** What can be done to a message that has not gone out yet. */
+enum class PendingAction { SendNow, ChangeTime, Edit, Cancel }
+
+/**
+ * A scheduled message: an outgoing bubble, faded, with a clock and its time underneath.
+ * Tapping it offers to send it now, change its time, edit it or cancel it.
+ */
+@Composable
+private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, PendingAction) -> Unit) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    val time = messageTime(context, message.sendAtMillis)
+    val label = stringResource(R.string.scheduled_for, time)
+    var menu by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = "$label: ${message.body}" }
+            .clickable { menu = true },
+        horizontalAlignment = Alignment.End,
+    ) {
+        Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.End) {
+            Box {
+                Text(
+                    message.body,
+                    Modifier
+                        .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
+                        .background(colors.primary.copy(alpha = 0.45f))
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    fontSize = 16.sp,
+                    color = colors.onPrimary,
+                )
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    listOf(
+                        PendingAction.SendNow to R.string.send_now,
+                        PendingAction.ChangeTime to R.string.change_time,
+                        PendingAction.Edit to R.string.edit,
+                        PendingAction.Cancel to R.string.cancel,
+                    ).forEach { (action, text) ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(text)) },
+                            onClick = {
+                                menu = false
+                                onAction(message, action)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painterResource(R.drawable.ic_schedule),
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontSize = 11.sp, color = colors.onSurfaceVariant)
+        }
     }
 }
 

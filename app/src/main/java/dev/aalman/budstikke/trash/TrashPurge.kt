@@ -12,16 +12,12 @@ import kotlin.concurrent.thread
 
 /**
  * Empties the trash of deletions older than 30 days once a day, whether or not the app is
- * opened. Alarms do not survive a reboot or an app update, so both set it again.
+ * opened. [dev.aalman.budstikke.system.BootReceiver] sets the alarm again after a restart.
  */
 class TrashPurgeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> schedulePurge(context)
-            ACTION_PURGE -> Unit
-            else -> return
-        }
+        if (intent.action != ACTION_PURGE) return
         val pending = goAsync()
         thread(name = "trash-purge") {
             try {

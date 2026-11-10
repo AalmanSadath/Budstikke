@@ -25,12 +25,34 @@ class AppDatabase private constructor(context: Context) :
         createTrash(db)
         createBlocks(db)
         createDrafts(db)
+        createOutgoing(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createTrash(db)
         if (oldVersion < 3) createBlocks(db)
         if (oldVersion < 4) createDrafts(db)
+        if (oldVersion < 5) createOutgoing(db)
+    }
+
+    /**
+     * Messages waiting to be sent at a set time: scheduled ones, and ones held back by the
+     * send delay. They reach the system store only when they are sent.
+     */
+    private fun createOutgoing(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE scheduled_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id INTEGER NOT NULL,
+                address TEXT NOT NULL,
+                body TEXT NOT NULL,
+                sub_id INTEGER NOT NULL,
+                send_at INTEGER NOT NULL,
+                delayed INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent(),
+        )
     }
 
     /** Text typed in a conversation and not sent yet, one per conversation. */
@@ -87,7 +109,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         private const val NAME = "budstikke.db"
-        private const val VERSION = 4
+        private const val VERSION = 5
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

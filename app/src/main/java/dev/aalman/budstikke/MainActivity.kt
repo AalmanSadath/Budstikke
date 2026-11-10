@@ -38,6 +38,16 @@ import dev.aalman.budstikke.ui.BlockedScreen
 import androidx.compose.runtime.rememberUpdatedState
 import dev.aalman.budstikke.data.Drafts
 import kotlinx.coroutines.delay
+import dev.aalman.budstikke.data.Outgoing
+import dev.aalman.budstikke.data.PendingMessage
+import dev.aalman.budstikke.sms.OutgoingQueue
+import dev.aalman.budstikke.ui.PendingAction
+import dev.aalman.budstikke.ui.SchedulePicker
+import dev.aalman.budstikke.ui.ScheduledEntry
+import dev.aalman.budstikke.ui.ScheduledScreen
+import dev.aalman.budstikke.ui.messageTime
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -87,6 +97,7 @@ class MainActivity : ComponentActivity() {
     private var showArchive by mutableStateOf(false)
     private var showTrash by mutableStateOf(false)
     private var showBlocked by mutableStateOf(false)
+    private var showScheduled by mutableStateOf(false)
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -111,6 +122,7 @@ class MainActivity : ComponentActivity() {
         showArchive = savedInstanceState?.getBoolean(STATE_ARCHIVE) ?: false
         showTrash = savedInstanceState?.getBoolean(STATE_TRASH) ?: false
         showBlocked = savedInstanceState?.getBoolean(STATE_BLOCKED) ?: false
+        showScheduled = savedInstanceState?.getBoolean(STATE_SCHEDULED) ?: false
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -141,9 +153,22 @@ class MainActivity : ComponentActivity() {
                             onBack = { showBlocked = false },
                         )
                     }
+                    showScheduled -> {
+                        BackHandler { showScheduled = false }
+                        ScheduledRoute(
+                            undo,
+                            onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                            onBack = { showScheduled = false },
+                        )
+                    }
                     showSettings -> {
                         BackHandler { showSettings = false }
-                        SettingsScreen(sims = sims, onShowBlocked = { showBlocked = true }, onBack = { showSettings = false })
+                        SettingsScreen(
+                            sims = sims,
+                            onShowScheduled = { showScheduled = true },
+                            onShowBlocked = { showBlocked = true },
+                            onBack = { showSettings = false },
+                        )
                     }
                     showTrash -> {
                         BackHandler { showTrash = false }
@@ -202,6 +227,7 @@ class MainActivity : ComponentActivity() {
         outState.putBoolean(STATE_ARCHIVE, showArchive)
         outState.putBoolean(STATE_TRASH, showTrash)
         outState.putBoolean(STATE_BLOCKED, showBlocked)
+        outState.putBoolean(STATE_SCHEDULED, showScheduled)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -244,6 +270,7 @@ class MainActivity : ComponentActivity() {
         private const val STATE_ARCHIVE = "archive"
         private const val STATE_TRASH = "trash"
         private const val STATE_BLOCKED = "blocked"
+        private const val STATE_SCHEDULED = "scheduled"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -303,6 +330,11 @@ private fun ConversationRoute(
     val blocked by produceState(false, thread.address) {
         blockList.changes().collect { value = withContext(Dispatchers.IO) { blockList.isBlocked(thread.address) } }
     }
+    val outgoing = remember { Outgoing.get(context) }
+    val pendingFlow = remember(thread.threadId) { outgoing.forThread(thread.threadId) }
+    val pending by pendingFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    // Null when closed; holds the message whose time is being changed, or nothing for a new one.
+    var picker by remember { mutableStateOf<SchedulePick?>(null) }
     val flags by produceState(Flags(), thread.threadId) {
         flagStore.changes().collect { value = withContext(Dispatchers.IO) { flagStore.of(thread.threadId) } }
     }
@@ -357,6 +389,19 @@ private fun ConversationRoute(
             }
         },
         onRetry = { message -> scope.launch(Dispatchers.IO) { sender.retry(message.id) } },
+        pending = pending,
+        onSchedule = { if (text.isNotBlank()) picker = SchedulePick(null) },
+        onPendingAction = { message, action ->
+            when (action) {
+                PendingAction.ChangeTime -> picker = SchedulePick(message)
+                PendingAction.Edit -> scope.launch {
+                    val claimed = withContext(Dispatchers.IO) { outgoing.claim(message.id) } ?: return@launch
+                    // Back into the field to change; scheduling again is a long press away.
+                    text = if (text.isBlank()) claimed.body else "${text.trimEnd()} ${claimed.body}"
+                }
+                else -> pendingAction(scope, context, undo, resources, message, action)
+            }
+        },
         flags = flags,
         onPinChange = { pinned ->
             scope.launch(Dispatchers.IO) { flagStore.setPinned(listOf(thread.threadId), pinned) }
@@ -392,6 +437,31 @@ private fun ConversationRoute(
         },
         onBack = onBack,
     )
+    picker?.let { pick ->
+        SchedulePicker(
+            initialMillis = pick.message?.sendAtMillis,
+            onDismiss = { picker = null },
+            onPick = { millis ->
+                picker = null
+                val changing = pick.message
+                if (changing != null) {
+                    scope.launch(Dispatchers.IO) { outgoing.reschedule(changing.id, millis) }
+                } else {
+                    val body = text.trim()
+                    if (body.isEmpty()) return@SchedulePicker
+                    text = ""
+                    val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            outgoing.add(thread.threadId, thread.address, body, subscription, millis, delayed = false)
+                        }
+                        undo.snackbar.currentSnackbarData?.dismiss()
+                        undo.snackbar.showSnackbar(resources.getString(R.string.scheduled_done, messageTime(context, millis)))
+                    }
+                }
+            },
+        )
+    }
 }
 
 /**
@@ -518,6 +588,49 @@ private fun BlockedRoute(
                 undo.push(resources.getString(R.string.unblocked_done, entry.title)) { blockList.block(entry.address) }
             }
         },
+        onBack = onBack,
+    )
+}
+
+/** The schedule picker is open: to change [message]'s time, or for a new one when null. */
+private data class SchedulePick(val message: PendingMessage?)
+
+/** Sends a waiting message now, or cancels it with undo. */
+private fun pendingAction(
+    scope: CoroutineScope,
+    context: Context,
+    undo: UndoQueue,
+    resources: Resources,
+    message: PendingMessage,
+    action: PendingAction,
+) {
+    val outgoing = Outgoing.get(context)
+    when (action) {
+        PendingAction.SendNow -> scope.launch(Dispatchers.IO) { OutgoingQueue.sendNow(context, message.id) }
+        PendingAction.Cancel -> scope.launch {
+            val claimed = withContext(Dispatchers.IO) { outgoing.claim(message.id) } ?: return@launch
+            undo.push(resources.getString(R.string.scheduled_cancelled)) { outgoing.restore(claimed) }
+        }
+        else -> Unit
+    }
+}
+
+@Composable
+private fun ScheduledRoute(undo: UndoQueue, onOpen: (PendingMessage) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val contacts = remember { ContactRepository.get(context) }
+    val flow = remember {
+        Outgoing.get(context).all()
+            .map { all -> all.filter { !it.delayed }.map { ScheduledEntry(it, contacts.lookup(it.address)) } }
+            .flowOn(Dispatchers.IO)
+    }
+    val entries by flow.collectAsStateWithLifecycle(initialValue = null)
+    ScheduledScreen(
+        entries = entries,
+        onOpen = onOpen,
+        onAction = { message, action -> pendingAction(scope, context, undo, resources, message, action) },
         onBack = onBack,
     )
 }
