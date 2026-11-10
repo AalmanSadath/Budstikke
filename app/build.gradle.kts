@@ -15,8 +15,32 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release signing comes from the environment, which only the release workflow sets,
+    // from repository secrets. Without all four the release build is left unsigned.
+    val keystore = System.getenv("BUDSTIKKE_KEYSTORE")
+    val keystorePassword = System.getenv("BUDSTIKKE_KEYSTORE_PASSWORD")
+    val keyAlias = System.getenv("BUDSTIKKE_KEY_ALIAS")
+    val keyPassword = System.getenv("BUDSTIKKE_KEY_PASSWORD")
+    val canSign = listOf(keystore, keystorePassword, keyAlias, keyPassword).all { !it.isNullOrEmpty() }
+    if (canSign) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystore!!)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
+        // Debug builds are a separate app, so one can sit beside the signed release, which a
+        // different key would otherwise refuse to install over.
+        debug {
+            applicationIdSuffix = ".debug"
+        }
         release {
+            if (canSign) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
