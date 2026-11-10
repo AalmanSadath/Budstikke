@@ -37,12 +37,15 @@ fun activeSims(context: Context): List<Sim> {
 }
 
 /**
- * The SIM a new message goes out on: the system's default SMS SIM when it is still active,
- * otherwise the first active SIM. Null means "let the system decide".
+ * The SIM a new message goes out on: the one chosen in settings while it is still active,
+ * then the system's default SMS SIM, then the first active SIM. Null means "let the system
+ * decide".
  */
-fun preferredSim(sims: List<Sim>): Sim? {
+fun preferredSim(sims: List<Sim>, chosenSubscriptionId: Int = SubscriptionManager.INVALID_SUBSCRIPTION_ID): Sim? {
     val default = SubscriptionManager.getDefaultSmsSubscriptionId()
-    return sims.firstOrNull { it.subscriptionId == default } ?: sims.firstOrNull()
+    return sims.firstOrNull { it.subscriptionId == chosenSubscriptionId }
+        ?: sims.firstOrNull { it.subscriptionId == default }
+        ?: sims.firstOrNull()
 }
 
 internal fun smsManagerFor(context: Context, subscriptionId: Int): SmsManager {

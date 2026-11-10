@@ -3,6 +3,7 @@ package dev.aalman.budstikke.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +40,7 @@ fun TopBar(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     Column(
         modifier
@@ -68,13 +70,14 @@ fun TopBar(
             }
             Text(
                 text = title,
-                modifier = Modifier.padding(horizontal = 8.dp),
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            actions()
         }
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
     }

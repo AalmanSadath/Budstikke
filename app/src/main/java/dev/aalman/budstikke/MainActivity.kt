@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
 import dev.aalman.budstikke.notify.ActiveConversation
 import dev.aalman.budstikke.notify.MessageNotifier
+import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.sms.SmsSender
 import dev.aalman.budstikke.sms.activeSims
@@ -41,6 +43,7 @@ import dev.aalman.budstikke.sms.preferredSim
 import dev.aalman.budstikke.ui.ConversationListScreen
 import dev.aalman.budstikke.ui.ConversationScreen
 import dev.aalman.budstikke.ui.RoleScreen
+import dev.aalman.budstikke.ui.SettingsScreen
 import dev.aalman.budstikke.ui.theme.BudstikkeTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -54,6 +57,7 @@ class MainActivity : ComponentActivity() {
     private val roleManager by lazy { getSystemService(RoleManager::class.java) }
     private var isDefaultSmsApp by mutableStateOf(false)
     private var openThread by mutableStateOf<OpenThread?>(null)
+    private var showSettings by mutableStateOf(false)
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -74,6 +78,7 @@ class MainActivity : ComponentActivity() {
         openThread = savedInstanceState?.let { state ->
             state.getString(STATE_ADDRESS)?.let { OpenThread(state.getLong(STATE_THREAD_ID), it) }
         } ?: threadFrom(intent)
+        showSettings = savedInstanceState?.getBoolean(STATE_SETTINGS) ?: false
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -88,6 +93,10 @@ class MainActivity : ComponentActivity() {
                         requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS))
                     }
                     thread != null -> ConversationRoute(thread, messages, sender, sims) { openThread = null }
+                    showSettings -> {
+                        BackHandler { showSettings = false }
+                        SettingsScreen(sims = sims, onBack = { showSettings = false })
+                    }
                     else -> {
                         val flow = remember { conversations.conversations() }
                         val list by flow.collectAsStateWithLifecycle(initialValue = null)
@@ -95,6 +104,7 @@ class MainActivity : ComponentActivity() {
                             conversations = list,
                             onOpen = { openThread = OpenThread(it.threadId, it.address) },
                             onNewMessage = { startActivity(Intent(this, ComposeActivity::class.java)) },
+                            onSettings = { showSettings = true },
                         )
                     }
                 }
@@ -116,6 +126,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_SETTINGS, showSettings)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -154,6 +165,7 @@ class MainActivity : ComponentActivity() {
         private const val EXTRA_ADDRESS = "dev.aalman.budstikke.ADDRESS"
         private const val STATE_THREAD_ID = "thread_id"
         private const val STATE_ADDRESS = "address"
+        private const val STATE_SETTINGS = "settings"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -179,7 +191,9 @@ private fun ConversationRoute(
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
-    val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription } ?: preferredSim(sims)
+    val settings by SettingsRepository.get(context).settings.collectAsState()
+    val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription }
+        ?: preferredSim(sims, settings.defaultSubscriptionId)
     val contacts = remember { ContactRepository.get(context) }
     val contact by produceState<Contact?>(null, thread.address) {
         value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }

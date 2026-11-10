@@ -28,4 +28,26 @@
     <string name="notification_reply">Reply</string>
     <string name="notification_reply_hint">Reply</string>
     <string name="notification_mark_read">Mark as read</string>
+    <string name="settings">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Colours</string>
+    <string name="settings_theme_dynamic">Wallpaper</string>
+    <string name="settings_theme_custom">Custom</string>
+    <string name="settings_theme_dynamic_unavailable">Wallpaper colours need Android 12 or later.</string>
+    <string name="settings_mode">Light or dark</string>
+    <string name="settings_mode_system">System</string>
+    <string name="settings_mode_light">Light</string>
+    <string name="settings_mode_dark">Dark</string>
+    <string name="settings_true_black">True black</string>
+    <string name="settings_true_black_hint">Pure black backgrounds in dark mode, for AMOLED screens.</string>
+    <string name="settings_accent">Accent colour</string>
+    <string name="settings_accent_theme">Theme accent</string>
+    <string name="settings_accent_custom">Accent %1$s</string>
+    <string name="settings_accent_hex">Hex colour</string>
+    <string name="settings_accent_hex_invalid">Enter a colour as #rgb or #rrggbb.</string>
+    <string name="settings_sending">Sending</string>
+    <string name="settings_sim">SIM for new messages</string>
+    <string name="settings_sim_system">System default</string>
+    <string name="settings_sim_hint">Replies from a notification go out on the SIM the message came in on.</string>
+    <string name="settings_sim_none">SIM choice needs phone access.</string>
 </resources>
