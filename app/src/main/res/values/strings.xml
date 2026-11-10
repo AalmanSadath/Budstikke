@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Budstikke</string>
+    <string name="role_title">Make Budstikke your SMS app</string>
+    <string name="role_body">Android lets only the default SMS app receive messages and save them on the phone. Budstikke has no internet access, so your messages stay on this device.</string>
+    <string name="role_button">Set as default SMS app</string>
+    <string name="role_unavailable">This device does not offer an SMS app role.</string>
+    <string name="list_empty">No conversations yet</string>
+    <string name="you_prefix">You: %1$s</string>
+    <string name="compose_title">New message</string>
+    <string name="compose_to">To %1$s</string>
+    <string name="compose_placeholder">Sending arrives in a later version.</string>
+    <plurals name="unread_count">
+        <item quantity="one">%1$d unread</item>
+        <item quantity="other">%1$d unread</item>
+    </plurals>
+</resources>
