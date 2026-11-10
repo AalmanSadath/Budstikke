@@ -18,6 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -27,6 +28,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.aalman.budstikke.data.Contact
+import dev.aalman.budstikke.data.ContactRepository
 import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
 import dev.aalman.budstikke.notify.ActiveConversation
@@ -41,6 +44,7 @@ import dev.aalman.budstikke.ui.RoleScreen
 import dev.aalman.budstikke.ui.theme.BudstikkeTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A conversation open on screen: its thread in the message store and who it is with. */
 private data class OpenThread(val threadId: Long, val address: String)
@@ -58,8 +62,9 @@ class MainActivity : ComponentActivity() {
         }
 
     private val requestPermissions =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
             sims = activeSims(this)
+            if (granted[Manifest.permission.READ_CONTACTS] == true) ContactRepository.get(this).invalidate()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,10 +127,12 @@ class MainActivity : ComponentActivity() {
         if (!isDefaultSmsApp) return
         sims = activeSims(this)
         // Phone state lists the SIMs; without it messages go out on the system's default
-        // SIM. Notifications need asking for from Android 13. Both are asked for once per
+        // SIM. Contacts give names and photos; without them numbers show. Notifications need
+        // asking for from Android 13. Both are asked for once per
         // launch, and everything else works if they are refused.
         val missing = buildList {
             add(Manifest.permission.READ_PHONE_STATE)
+            add(Manifest.permission.READ_CONTACTS)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty() && !askedForPermissions) {
@@ -166,16 +173,23 @@ private fun ConversationRoute(
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val flow = remember(thread.threadId) { repository.messages(thread.threadId) }
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
     val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription } ?: preferredSim(sims)
+    val contacts = remember { ContactRepository.get(context) }
+    val contact by produceState<Contact?>(null, thread.address) {
+        value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
+        contacts.changes().collect {
+            value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
+        }
+    }
 
     // While the conversation is on screen, what arrives in it is seen: no notification,
     // and it is marked read. Leaving the screen or the app ends that.
-    val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(thread.threadId, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -197,7 +211,8 @@ private fun ConversationRoute(
     }
 
     ConversationScreen(
-        title = thread.address,
+        address = thread.address,
+        contact = contact,
         messages = messages,
         sims = sims,
         composeText = text,

@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.Message
 import dev.aalman.budstikke.data.MessageState
 import dev.aalman.budstikke.sms.Sim
@@ -35,7 +36,8 @@ import dev.aalman.budstikke.sms.Sim
 /** One conversation: its messages, newest at the bottom, and the field to reply. */
 @Composable
 fun ConversationScreen(
-    title: String,
+    address: String,
+    contact: Contact?,
     messages: List<Message>,
     sims: List<Sim>,
     composeText: String,
@@ -52,7 +54,7 @@ fun ConversationScreen(
             .background(MaterialTheme.colorScheme.background)
             .imePadding(),
     ) {
-        TopBar(title, onBack = onBack)
+        TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) })
         val listState = rememberLazyListState()
         val newest = messages.lastOrNull()
         // The list runs bottom up and keeps its place on the message it was showing, so a

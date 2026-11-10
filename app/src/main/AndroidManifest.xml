@@ -10,6 +10,8 @@
     <!-- Lists the active SIMs so a message can be sent on either. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Shows saved contacts' names and photos instead of bare numbers. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 
 /** The newest message of one SMS thread, as the conversation list shows it. */
 data class Conversation(
@@ -16,7 +17,11 @@ data class Conversation(
     val dateMillis: Long,
     val lastFromMe: Boolean,
     val unreadCount: Int,
-)
+    val contact: Contact? = null,
+) {
+    /** The contact's name, or the number or sender name when there is no saved contact. */
+    val title: String get() = contact?.name ?: address
+}
 
 /**
  * Reads conversations from the system message store. Only the SMS table is queried, so
@@ -25,9 +30,10 @@ data class Conversation(
 class ConversationRepository(context: Context) {
 
     private val resolver = context.applicationContext.contentResolver
+    private val contacts = ContactRepository.get(context)
 
-    /** Emits the conversation list now and again whenever the SMS store changes. */
-    fun conversations(): Flow<List<Conversation>> = resolver.smsChanges()
+    /** Emits the conversation list now, and again whenever the SMS store or contacts change. */
+    fun conversations(): Flow<List<Conversation>> = merge(resolver.smsChanges(), contacts.changes())
         .conflate()
         .map { load() }
         .flowOn(Dispatchers.IO)
@@ -75,6 +81,8 @@ class ConversationRepository(context: Context) {
             }
         }
         // Rows come newest first, so insertion order is already the list order.
-        return latest.values.map { it.copy(unreadCount = unread[it.threadId] ?: 0) }
+        return latest.values.map {
+            it.copy(unreadCount = unread[it.threadId] ?: 0, contact = contacts.lookup(it.address))
+        }
     }
 }

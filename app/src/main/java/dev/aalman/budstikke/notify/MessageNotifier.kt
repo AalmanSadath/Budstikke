@@ -13,9 +13,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import dev.aalman.budstikke.MainActivity
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.data.ContactRepository
 
 /**
  * One notification per conversation, listing its unread messages. It is rebuilt from the
@@ -47,7 +49,13 @@ class MessageNotifier(context: Context) {
         ensureChannel()
 
         val address = unread.last().address
-        val sender = Person.Builder().setName(address).setKey(address).build()
+        val contacts = ContactRepository.get(context)
+        val contact = contacts.lookup(address)
+        val sender = Person.Builder()
+            .setName(contact?.name ?: address)
+            .setKey(address)
+            .apply { contact?.photoUri?.let(contacts::photo)?.let { setIcon(IconCompat.createWithBitmap(it)) } }
+            .build()
         val me = Person.Builder().setName(context.getString(R.string.notification_you)).build()
         val style = NotificationCompat.MessagingStyle(me)
         unread.forEach { style.addMessage(it.body, it.dateMillis, sender) }
