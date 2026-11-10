@@ -70,7 +70,7 @@ private val accentSwatches = listOf(
 )
 
 @Composable
-fun SettingsScreen(sims: List<Sim>, onBack: () -> Unit) {
+fun SettingsScreen(sims: List<Sim>, onShowBlocked: () -> Unit, onBack: () -> Unit) {
     val repository = SettingsRepository.get(LocalContext.current)
     val settings by repository.settings.collectAsState()
 
@@ -144,6 +144,10 @@ fun SettingsScreen(sims: List<Sim>, onBack: () -> Unit) {
                 }
                 Hint(stringResource(R.string.settings_sim_hint))
             }
+
+            Spacer(Modifier.height(28.dp))
+            SectionHeading(stringResource(R.string.settings_blocking))
+            LinkRow(stringResource(R.string.blocked_title), stringResource(R.string.settings_blocked_hint), onShowBlocked)
         }
     }
 }
@@ -259,6 +263,21 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
             Spacer(Modifier.width(8.dp))
             Text(detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/** A row that opens another page. */
+@Composable
+private fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+    ) {
+        Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

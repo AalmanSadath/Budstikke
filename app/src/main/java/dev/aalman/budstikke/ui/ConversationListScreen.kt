@@ -62,6 +62,7 @@ fun ConversationListScreen(
     onPin: (Set<Long>, Boolean) -> Unit,
     onArchive: (Set<Long>, Boolean) -> Unit,
     onDelete: (List<Conversation>) -> Unit,
+    onBlock: (List<Conversation>) -> Unit,
     onBack: (() -> Unit)? = null,
     onNewMessage: (() -> Unit)? = null,
     onShowArchive: (() -> Unit)? = null,
@@ -90,6 +91,11 @@ fun ConversationListScreen(
                     }
                 },
             ) {
+                // Left of the rest, so adding it moves none of the buttons that were there.
+                BarAction(R.drawable.ic_block, R.string.block_number) {
+                    onBlock(chosen)
+                    selected = emptySet()
+                }
                 BarAction(
                     if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
                     if (archive) R.string.unarchive else R.string.archive,

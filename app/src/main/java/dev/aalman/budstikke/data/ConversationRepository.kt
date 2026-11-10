@@ -20,10 +20,26 @@ data class Conversation(
     val unreadCount: Int,
     val contact: Contact? = null,
     val flags: Flags = Flags(),
+    val blocked: Boolean = false,
 ) {
+    val folder: Folder
+        get() = when {
+            blocked -> Folder.Blocked
+            flags.archived -> Folder.Archive
+            else -> Folder.Main
+        }
+
     /** The contact's name, or the number or sender name when there is no saved contact. */
     val title: String get() = contact?.name ?: address
 }
+
+/** A blocked address, and its conversation when there is one. */
+data class BlockedEntry(val address: String, val conversation: Conversation?, val contact: Contact?) {
+    val title: String get() = contact?.name ?: conversation?.address ?: address
+}
+
+/** Which conversations a list shows. Blocked ones show only in [Blocked], wherever they were. */
+enum class Folder { Main, Archive, Blocked }
 
 /**
  * Reads conversations from the system message store. Only the SMS table is queried, so
@@ -34,18 +50,36 @@ class ConversationRepository(context: Context) {
     private val resolver = context.applicationContext.contentResolver
     private val contacts = ContactRepository.get(context)
     private val flags = ConversationFlags.get(context)
+    private val blocks = BlockList.get(context)
 
     /**
-     * Emits the main list, or the archive when [archived] is true, now and again whenever the
-     * SMS store, contacts, pins or the archive change. The main list has pinned
-     * conversations first; within each part the newest is first.
+     * Emits one folder's conversations now, and again whenever the SMS store, contacts,
+     * pins, the archive or the block list change. The main list has pinned conversations
+     * first; within each part the newest is first.
      */
-    fun conversations(archived: Boolean): Flow<List<Conversation>> =
-        merge(resolver.smsChanges(), contacts.changes(), flags.changes())
+    fun conversations(folder: Folder): Flow<List<Conversation>> =
+        merge(resolver.smsChanges(), contacts.changes(), flags.changes(), blocks.changes())
             .conflate()
-            .map { load()?.filter { it.flags.archived == archived }?.sortedByDescending { it.flags.pinned } }
+            .map { load()?.filter { it.folder == folder }?.sortedByDescending { it.flags.pinned } }
             .flowOn(Dispatchers.IO)
             .filterNotNull()
+
+    /**
+     * Every blocked address with its conversations, one entry per conversation, or one
+     * without a conversation when the number has sent nothing since.
+     */
+    fun blocked(): Flow<List<BlockedEntry>> = conversations(Folder.Blocked)
+        .map { conversations ->
+            blocks.all().flatMap { address ->
+                val matching = conversations.filter { sameSender(it.address, address) }
+                if (matching.isEmpty()) {
+                    listOf(BlockedEntry(address, null, contacts.lookup(address)))
+                } else {
+                    matching.map { BlockedEntry(address, it, it.contact) }
+                }
+            }
+        }
+        .flowOn(Dispatchers.IO)
 
     private fun load(): List<Conversation>? {
         val latest = LinkedHashMap<Long, Conversation>()
@@ -98,6 +132,7 @@ class ConversationRepository(context: Context) {
                 unreadCount = unread[it.threadId] ?: 0,
                 contact = contacts.lookup(it.address),
                 flags = allFlags[it.threadId] ?: Flags(),
+                blocked = blocks.isBlocked(it.address),
             )
         }
     }
