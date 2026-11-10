@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
 import dev.aalman.budstikke.notify.ActiveConversation
 import dev.aalman.budstikke.notify.MessageNotifier
+import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.sms.SmsSender
 import dev.aalman.budstikke.sms.activeSims
@@ -93,7 +95,7 @@ class MainActivity : ComponentActivity() {
                     thread != null -> ConversationRoute(thread, messages, sender, sims) { openThread = null }
                     showSettings -> {
                         BackHandler { showSettings = false }
-                        SettingsScreen(onBack = { showSettings = false })
+                        SettingsScreen(sims = sims, onBack = { showSettings = false })
                     }
                     else -> {
                         val flow = remember { conversations.conversations() }
@@ -189,7 +191,9 @@ private fun ConversationRoute(
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
-    val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription } ?: preferredSim(sims)
+    val settings by SettingsRepository.get(context).settings.collectAsState()
+    val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription }
+        ?: preferredSim(sims, settings.defaultSubscriptionId)
     val contacts = remember { ContactRepository.get(context) }
     val contact by produceState<Contact?>(null, thread.address) {
         value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }

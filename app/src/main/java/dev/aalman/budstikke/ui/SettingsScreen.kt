@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,10 +53,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.telephony.SubscriptionManager
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.settings.ThemeMode
 import dev.aalman.budstikke.settings.ThemeSource
+import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.ui.theme.dynamicColourAvailable
 import dev.aalman.budstikke.ui.theme.parseHex
 import dev.aalman.budstikke.ui.theme.toHex
@@ -67,7 +70,7 @@ private val accentSwatches = listOf(
 )
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(sims: List<Sim>, onBack: () -> Unit) {
     val repository = SettingsRepository.get(LocalContext.current)
     val settings by repository.settings.collectAsState()
 
@@ -121,6 +124,26 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onAccent = { accent -> repository.update { it.copy(accent = accent) } },
             )
 
+            Spacer(Modifier.height(28.dp))
+            SectionHeading(stringResource(R.string.settings_sending))
+            Label(stringResource(R.string.settings_sim))
+            if (sims.isEmpty()) {
+                Hint(stringResource(R.string.settings_sim_none))
+            } else {
+                val chosen = settings.defaultSubscriptionId.takeIf { id -> sims.any { it.subscriptionId == id } }
+                    ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
+                Column(Modifier.selectableGroup()) {
+                    RadioRow(stringResource(R.string.settings_sim_system), null, chosen == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+                        repository.update { it.copy(defaultSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID) }
+                    }
+                    sims.forEach { sim ->
+                        RadioRow(sim.name, sim.slotLabel, chosen == sim.subscriptionId) {
+                            repository.update { it.copy(defaultSubscriptionId = sim.subscriptionId) }
+                        }
+                    }
+                }
+                Hint(stringResource(R.string.settings_sim_hint))
+            }
         }
     }
 }
@@ -217,6 +240,25 @@ private fun SwitchRow(title: String, hint: String, checked: Boolean, onCheckedCh
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .selectable(selected, role = Role.RadioButton, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+        if (detail != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

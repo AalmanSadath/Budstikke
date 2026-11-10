@@ -45,4 +45,9 @@
     <string name="settings_accent_custom">Accent %1$s</string>
     <string name="settings_accent_hex">Hex colour</string>
     <string name="settings_accent_hex_invalid">Enter a colour as #rgb or #rrggbb.</string>
+    <string name="settings_sending">Sending</string>
+    <string name="settings_sim">SIM for new messages</string>
+    <string name="settings_sim_system">System default</string>
+    <string name="settings_sim_hint">Replies from a notification go out on the SIM the message came in on.</string>
+    <string name="settings_sim_none">SIM choice needs phone access.</string>
 </resources>

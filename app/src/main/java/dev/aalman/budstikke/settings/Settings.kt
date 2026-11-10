@@ -1,6 +1,7 @@
 package dev.aalman.budstikke.settings
 
 import android.content.Context
+import android.telephony.SubscriptionManager
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,8 @@ data class Settings(
     val trueBlack: Boolean = false,
     /** A chosen accent as 0xRRGGBB, or null to use the theme's own. */
     val accent: Int? = null,
+    /** The SIM new messages go out on, or INVALID_SUBSCRIPTION_ID for the system's default. */
+    val defaultSubscriptionId: Int = SubscriptionManager.INVALID_SUBSCRIPTION_ID,
 )
 
 /**
@@ -39,6 +42,7 @@ class SettingsRepository private constructor(context: Context) {
             putString(KEY_MODE, next.themeMode.name)
             putBoolean(KEY_TRUE_BLACK, next.trueBlack)
             if (next.accent != null) putInt(KEY_ACCENT, next.accent) else remove(KEY_ACCENT)
+            putInt(KEY_SUBSCRIPTION, next.defaultSubscriptionId)
         }
         state.value = next
     }
@@ -50,6 +54,7 @@ class SettingsRepository private constructor(context: Context) {
             themeMode = enumOrDefault(prefs.getString(KEY_MODE, null), defaults.themeMode),
             trueBlack = prefs.getBoolean(KEY_TRUE_BLACK, defaults.trueBlack),
             accent = if (prefs.contains(KEY_ACCENT)) prefs.getInt(KEY_ACCENT, 0) else null,
+            defaultSubscriptionId = prefs.getInt(KEY_SUBSCRIPTION, defaults.defaultSubscriptionId),
         )
     }
 
@@ -61,6 +66,7 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_MODE = "theme_mode"
         private const val KEY_TRUE_BLACK = "true_black"
         private const val KEY_ACCENT = "accent"
+        private const val KEY_SUBSCRIPTION = "default_subscription"
 
         @Volatile
         private var instance: SettingsRepository? = null

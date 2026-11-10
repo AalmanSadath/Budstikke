@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.sms.SmsSender
 import dev.aalman.budstikke.sms.activeSims
 import dev.aalman.budstikke.sms.bodyOf
@@ -73,7 +75,9 @@ class ComposeActivity : ComponentActivity() {
                 var to by rememberSaveable { mutableStateOf(initialTo) }
                 var body by rememberSaveable { mutableStateOf(initialBody) }
                 var chosen by rememberSaveable { mutableStateOf<Int?>(null) }
-                val sim = sims.firstOrNull { it.subscriptionId == chosen } ?: preferredSim(sims)
+                val settings by SettingsRepository.get(this).settings.collectAsState()
+                val sim = sims.firstOrNull { it.subscriptionId == chosen }
+                    ?: preferredSim(sims, settings.defaultSubscriptionId)
 
                 Column(
                     Modifier
