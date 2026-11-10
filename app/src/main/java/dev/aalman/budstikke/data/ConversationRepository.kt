@@ -21,6 +21,8 @@ data class Conversation(
     val contact: Contact? = null,
     val flags: Flags = Flags(),
     val blocked: Boolean = false,
+    /** Text typed in the conversation and not sent, if any. */
+    val draft: String? = null,
 ) {
     val folder: Folder
         get() = when {
@@ -51,6 +53,7 @@ class ConversationRepository(context: Context) {
     private val contacts = ContactRepository.get(context)
     private val flags = ConversationFlags.get(context)
     private val blocks = BlockList.get(context)
+    private val drafts = Drafts.get(context)
 
     /**
      * Emits one folder's conversations now, and again whenever the SMS store, contacts,
@@ -58,7 +61,7 @@ class ConversationRepository(context: Context) {
      * first; within each part the newest is first.
      */
     fun conversations(folder: Folder): Flow<List<Conversation>> =
-        merge(resolver.smsChanges(), contacts.changes(), flags.changes(), blocks.changes())
+        merge(resolver.smsChanges(), contacts.changes(), flags.changes(), blocks.changes(), drafts.changes())
             .conflate()
             .map { load()?.filter { it.folder == folder }?.sortedByDescending { it.flags.pinned } }
             .flowOn(Dispatchers.IO)
@@ -125,7 +128,9 @@ class ConversationRepository(context: Context) {
             }
         }
         flags.forgetAllBut(latest.keys)
+        drafts.forgetAllBut(latest.keys)
         val allFlags = flags.all()
+        val allDrafts = drafts.all()
         // Rows come newest first, so insertion order is already date order.
         return latest.values.map {
             it.copy(
@@ -133,6 +138,7 @@ class ConversationRepository(context: Context) {
                 contact = contacts.lookup(it.address),
                 flags = allFlags[it.threadId] ?: Flags(),
                 blocked = blocks.isBlocked(it.address),
+                draft = allDrafts[it.threadId],
             )
         }
     }

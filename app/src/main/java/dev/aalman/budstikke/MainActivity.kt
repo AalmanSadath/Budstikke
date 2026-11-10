@@ -35,6 +35,9 @@ import kotlinx.coroutines.CoroutineScope
 import dev.aalman.budstikke.data.BlockList
 import dev.aalman.budstikke.data.Folder
 import dev.aalman.budstikke.ui.BlockedScreen
+import androidx.compose.runtime.rememberUpdatedState
+import dev.aalman.budstikke.data.Drafts
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -251,6 +254,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** How long typing must pause before the draft is saved. */
+private const val DRAFT_SAVE_DELAY_MILLIS = 500L
+
 @Composable
 private fun ConversationRoute(
     thread: OpenThread,
@@ -266,6 +272,25 @@ private fun ConversationRoute(
     val flow = remember(thread.threadId) { repository.messages(thread.threadId) }
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
+    // Unsent text is kept as a draft: filled in when the conversation opens, saved shortly
+    // after typing stops, and saved at once when the screen or the app is left.
+    val drafts = remember { Drafts.get(context) }
+    var draftLoaded by rememberSaveable(thread.threadId) { mutableStateOf(false) }
+    LaunchedEffect(thread.threadId) {
+        if (!draftLoaded) {
+            val saved = withContext(Dispatchers.IO) { drafts.get(thread.threadId) }
+            if (text.isEmpty() && saved != null) text = saved
+            draftLoaded = true
+        }
+    }
+    LaunchedEffect(thread.threadId, text, draftLoaded) {
+        if (!draftLoaded) return@LaunchedEffect
+        delay(DRAFT_SAVE_DELAY_MILLIS)
+        drafts.put(thread.threadId, text)
+    }
+    val latestText by rememberUpdatedState(text)
+    val latestLoaded by rememberUpdatedState(draftLoaded)
+    val saveDraft = { if (latestLoaded) drafts.put(thread.threadId, latestText) }
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
     val settings by SettingsRepository.get(context).settings.collectAsState()
     val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription }
@@ -295,13 +320,17 @@ private fun ConversationRoute(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> ActiveConversation.threadId = thread.threadId
-                Lifecycle.Event.ON_PAUSE -> ActiveConversation.threadId = null
+                Lifecycle.Event.ON_PAUSE -> {
+                    ActiveConversation.threadId = null
+                    saveDraft()
+                }
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            saveDraft()
             if (ActiveConversation.threadId == thread.threadId) ActiveConversation.threadId = null
         }
     }
