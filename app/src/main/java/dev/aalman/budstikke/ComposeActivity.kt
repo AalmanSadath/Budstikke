@@ -1,66 +1,132 @@
 package dev.aalman.budstikke
 
+import android.app.role.RoleManager
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.provider.Telephony
+import android.telephony.SubscriptionManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
+import dev.aalman.budstikke.sms.SmsSender
+import dev.aalman.budstikke.sms.activeSims
+import dev.aalman.budstikke.sms.bodyOf
+import dev.aalman.budstikke.sms.parseRecipients
+import dev.aalman.budstikke.sms.preferredSim
+import dev.aalman.budstikke.ui.ComposeBar
 import dev.aalman.budstikke.ui.TopBar
 import dev.aalman.budstikke.ui.theme.BudstikkeTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Opened by sms: and smsto: links. The SMS role requires an activity for them; for now it
- * names the recipient, and sending comes later.
+ * A new message: from the new-message button, or from an sms:/smsto: link in another app,
+ * which can carry the numbers and a body. Several numbers each get the message on their own,
+ * since group messages need MMS.
  */
 class ComposeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Only the default SMS app may write sent messages, so without the role the main
+        // screen asks for it first.
+        if (!getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_SMS)) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+            return
+        }
         enableEdgeToEdge()
-        val recipients = recipientsOf(intent)
+        val ssp = intent.data?.schemeSpecificPart.orEmpty()
+        val initialTo = parseRecipients(ssp).joinToString(", ")
+        val initialBody = intent.getStringExtra("sms_body")
+            ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+            ?: bodyOf(ssp)
+            ?: ""
+        val sims = activeSims(this)
+        val sender = SmsSender(this)
 
         setContent {
             BudstikkeTheme {
-                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    TopBar(stringResource(R.string.compose_title))
-                    Column(Modifier.padding(16.dp)) {
-                        if (recipients.isNotEmpty()) {
-                            Text(
-                                stringResource(R.string.compose_to, recipients),
-                                fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        Text(
-                            stringResource(R.string.compose_placeholder),
-                            Modifier.padding(top = 8.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                var to by rememberSaveable { mutableStateOf(initialTo) }
+                var body by rememberSaveable { mutableStateOf(initialBody) }
+                var chosen by rememberSaveable { mutableStateOf<Int?>(null) }
+                val sim = sims.firstOrNull { it.subscriptionId == chosen } ?: preferredSim(sims)
+
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .imePadding(),
+                ) {
+                    TopBar(stringResource(R.string.new_message), onBack = ::finish)
+                    OutlinedTextField(
+                        value = to,
+                        onValueChange = { to = it },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        label = { Text(stringResource(R.string.to_label)) },
+                        placeholder = { Text(stringResource(R.string.to_hint)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
+                    )
+                    Box(Modifier.weight(1f))
+                    ComposeBar(
+                        text = body,
+                        onTextChange = { body = it },
+                        sims = sims,
+                        sim = sim,
+                        onSimChange = { chosen = it.subscriptionId },
+                        onSend = {
+                            val recipients = parseRecipients(to)
+                            val text = body.trim()
+                            if (recipients.isNotEmpty() && text.isNotEmpty()) {
+                                send(sender, recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                            }
+                        },
+                        modifier = Modifier.navigationBarsPadding(),
+                    )
                 }
             }
         }
     }
 
-    /** "sms:+4712345678;+4787654321?body=hi" gives "+4712345678, +4787654321". */
-    private fun recipientsOf(intent: Intent): String {
-        val data: Uri = intent.data ?: return ""
-        return data.schemeSpecificPart.orEmpty()
-            .substringBefore('?')
-            .split(',', ';')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .joinToString(", ")
+    private fun send(sender: SmsSender, recipients: List<String>, text: String, subscriptionId: Int) {
+        lifecycleScope.launch {
+            val thread = withContext(Dispatchers.IO) {
+                recipients.forEach { sender.send(it, text, subscriptionId) }
+                recipients.singleOrNull()?.let { Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, it) }
+            }
+            startActivity(
+                if (thread != null) {
+                    MainActivity.openConversation(this@ComposeActivity, thread, recipients.single())
+                } else {
+                    Intent(this@ComposeActivity, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                },
+            )
+            finish()
+        }
     }
 }

@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Lists the active SIMs so a message can be sent on either. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
@@ -19,6 +21,7 @@
         android:required="true" />
 
     <application
+        android:name=".BudstikkeApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@android:drawable/sym_action_chat"
@@ -28,7 +31,8 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -38,7 +42,8 @@
         <!-- The compose screen the SMS role requires: opened by sms: and smsto: links. -->
         <activity
             android:name=".ComposeActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SENDTO" />
@@ -70,6 +75,12 @@
                 <data android:mimeType="application/vnd.wap.mms-message" />
             </intent-filter>
         </receiver>
+
+        <!-- Sent and delivered results for outgoing SMS. Only this app's own
+             PendingIntents reach it. -->
+        <receiver
+            android:name=".sms.SmsStatusReceiver"
+            android:exported="false" />
 
         <!-- "Reply with message" on an incoming call. -->
         <service
