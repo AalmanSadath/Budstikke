@@ -122,16 +122,18 @@ private fun TrashRow(item: TrashItem, onRestore: () -> Unit, onDeleteForever: ()
     Box {
         Row(
             Modifier
+                .padding(horizontal = 4.dp, vertical = 4.dp)
                 .fillMaxWidth()
+                .card()
                 .clickable { menu = true }
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
                 .semantics(mergeDescendants = true) {
                     contentDescription = listOf(item.title, summary, deleted).joinToString(", ")
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Avatar(item.address, item.contact)
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title,

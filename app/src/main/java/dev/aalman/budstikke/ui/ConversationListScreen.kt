@@ -36,7 +36,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -132,7 +131,7 @@ fun ConversationListScreen(
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
                 // Room under the last row so the new-message button does not cover it.
-                contentPadding = WindowInsets.navigationBars.add(WindowInsets(bottom = 88.dp)).asPaddingValues(),
+                contentPadding = WindowInsets.navigationBars.add(WindowInsets(top = 4.dp, bottom = 88.dp)).asPaddingValues(),
             ) {
                 items(conversations, key = { it.threadId }) { conversation ->
                     val toggle = {
@@ -202,14 +201,13 @@ private fun ConversationRow(
         conversation.snippet
     }
     val time = listTime(LocalContext.current, conversation.dateMillis)
-    // A selected row sits on the accent wash BifroSSH uses for its chosen settings entry.
-    val primary = MaterialTheme.colorScheme.primary
     Row(
         modifier
+            .padding(horizontal = 4.dp, vertical = 4.dp)
             .fillMaxWidth()
-            .background(if (isSelected) primary.copy(alpha = 0.15f) else Color.Transparent)
+            .card(isSelected)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
             .semantics(mergeDescendants = true) {
                 selected = isSelected
                 contentDescription = listOf(conversation.title, pinnedLabel, unreadLabel, snippet, time)
@@ -219,7 +217,7 @@ private fun ConversationRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(conversation.address, conversation.contact)
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
