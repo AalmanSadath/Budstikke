@@ -19,7 +19,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
+import dev.aalman.budstikke.data.PendingMessage
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.graphics.Color
@@ -40,6 +48,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -71,6 +80,9 @@ fun ConversationScreen(
     onDeleteConversation: () -> Unit,
     blocked: Boolean,
     onBlockChange: (Boolean) -> Unit,
+    pending: List<PendingMessage>,
+    onPendingAction: (PendingMessage, PendingAction) -> Unit,
+    onSchedule: () -> Unit,
     onBack: () -> Unit,
 ) {
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
@@ -121,13 +133,27 @@ fun ConversationScreen(
             val wasAtBottom = listState.firstVisibleItemIndex <= 1
             if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
         }
+        // A message just held back by the send delay, or just scheduled, is added below the
+        // rest the same way; bring it into view.
+        val newestPending = pending.maxOfOrNull { it.id }
+        LaunchedEffect(newestPending) {
+            if (newestPending != null) listState.animateScrollToItem(0)
+        }
+        val focusManager = LocalFocusManager.current
         LazyColumn(
-            Modifier.weight(1f).fillMaxWidth(),
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clearFocusOnTap(focusManager),
             state = listState,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Messages still waiting to go out sit below the sent ones, soonest nearest them.
+            items(pending.asReversed(), key = { "pending:${it.id}" }) { message ->
+                PendingBubble(message, onPendingAction)
+            }
             items(messages.asReversed(), key = { it.id }) { message ->
                 val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
                 Bubble(
@@ -152,9 +178,114 @@ fun ConversationScreen(
             onSimChange = onSimChange,
             onSend = onSend,
             modifier = Modifier.navigationBarsPadding(),
+            onSchedule = onSchedule,
         )
     }
 }
+
+/** What can be done to a message that has not gone out yet. */
+enum class PendingAction { SendNow, ChangeTime, Edit, Cancel }
+
+/**
+ * A scheduled message: an outgoing bubble, faded, with a clock and its time underneath.
+ * Tapping it offers to send it now, change its time, edit it or cancel it.
+ */
+@Composable
+private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, PendingAction) -> Unit) {
+    if (message.delayed) {
+        DelayedBubble(message) { onAction(message, PendingAction.Edit) }
+        return
+    }
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    val time = messageTime(context, message.sendAtMillis)
+    val label = stringResource(R.string.scheduled_for, time)
+    var menu by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = "$label: ${message.body}" }
+            .clickable { menu = true },
+        horizontalAlignment = Alignment.End,
+    ) {
+        Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.End) {
+            Box {
+                Text(
+                    message.body,
+                    Modifier
+                        .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
+                        .background(colors.primary.copy(alpha = 0.45f))
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    fontSize = 16.sp,
+                    color = colors.onPrimary,
+                )
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    listOf(
+                        PendingAction.SendNow to R.string.send_now,
+                        PendingAction.ChangeTime to R.string.change_time,
+                        PendingAction.Edit to R.string.edit,
+                        PendingAction.Cancel to R.string.cancel,
+                    ).forEach { (action, text) ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(text)) },
+                            onClick = {
+                                menu = false
+                                onAction(message, action)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painterResource(R.drawable.ic_schedule),
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontSize = 11.sp, color = colors.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * A message held back by the send delay: a faded outgoing bubble with a countdown to when
+ * it goes and a Cancel button, which puts the text back in the field.
+ */
+@Composable
+private fun DelayedBubble(message: PendingMessage, onCancel: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val now by produceState(System.currentTimeMillis(), message.sendAtMillis) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(200)
+        }
+    }
+    val label = stringResource(R.string.sending_in, secondsLeft(message.sendAtMillis, now))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.End) {
+            Text(
+                message.body,
+                Modifier
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
+                    .background(colors.primary.copy(alpha = 0.45f))
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                fontSize = 16.sp,
+                color = colors.onPrimary,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.padding(start = 6.dp), fontSize = 11.sp, color = colors.onSurfaceVariant)
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+        }
+    }
+}
+
+/** Whole seconds until [sendAtMillis], rounded up so the count reaches 1 before it goes, never below 0. */
+internal fun secondsLeft(sendAtMillis: Long, nowMillis: Long): Int =
+    ((sendAtMillis - nowMillis + 999) / 1000).coerceAtLeast(0).toInt()
 
 /** Names the SIM a message came in on, only when there is more than one to tell apart. */
 private fun List<Sim>.labelFor(message: Message): String? =

@@ -12,8 +12,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Shows saved contacts' names and photos instead of bare numbers. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <!-- Sets the daily alarm that empties expired trash again after a restart. -->
+    <!-- Sets alarms again after a restart: the trash clean-up and scheduled messages. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Scheduled messages go out on the minute. USE_EXACT_ALARM is granted on install from
+         Android 13; Android 12 needs SCHEDULE_EXACT_ALARM, also granted there. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
@@ -92,10 +98,21 @@
             android:name=".notify.NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- Empties trash older than 30 days once a day; set again after a restart or an
-             update, which clear alarms. -->
+        <!-- Empties trash older than 30 days once a day. Only the app's own alarm reaches it. -->
         <receiver
             android:name=".trash.TrashPurgeReceiver"
+            android:exported="false" />
+
+        <!-- Sends scheduled messages when their time comes. Only the app's own alarm
+             reaches it. -->
+        <receiver
+            android:name=".sms.OutgoingReceiver"
+            android:exported="false" />
+
+        <!-- Restarts and updates clear alarms; this sets them again and sends scheduled
+             messages that fell due while the phone was off. -->
+        <receiver
+            android:name=".system.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

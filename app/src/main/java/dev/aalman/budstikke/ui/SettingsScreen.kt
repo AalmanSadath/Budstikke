@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.telephony.SubscriptionManager
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.settings.SEND_DELAYS
 import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.settings.ThemeMode
 import dev.aalman.budstikke.settings.ThemeSource
@@ -70,7 +71,7 @@ private val accentSwatches = listOf(
 )
 
 @Composable
-fun SettingsScreen(sims: List<Sim>, onShowBlocked: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: () -> Unit, onBack: () -> Unit) {
     val repository = SettingsRepository.get(LocalContext.current)
     val settings by repository.settings.collectAsState()
 
@@ -144,6 +145,18 @@ fun SettingsScreen(sims: List<Sim>, onShowBlocked: () -> Unit, onBack: () -> Uni
                 }
                 Hint(stringResource(R.string.settings_sim_hint))
             }
+            Spacer(Modifier.height(16.dp))
+            Label(stringResource(R.string.settings_send_delay))
+            Choices(
+                options = SEND_DELAYS.map { seconds ->
+                    seconds to if (seconds == 0) stringResource(R.string.settings_send_delay_off) else stringResource(R.string.seconds_short, seconds)
+                },
+                selected = settings.sendDelaySeconds,
+                onSelect = { seconds -> repository.update { it.copy(sendDelaySeconds = seconds) } },
+            )
+            Hint(stringResource(R.string.settings_send_delay_hint))
+            Spacer(Modifier.height(12.dp))
+            LinkRow(stringResource(R.string.scheduled_title), stringResource(R.string.scheduled_hint), onShowScheduled)
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))

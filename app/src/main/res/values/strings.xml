@@ -120,4 +120,23 @@
         <item quantity="other">%1$d numbers blocked</item>
     </plurals>
     <string name="draft_label">Draft:</string>
+    <string name="schedule_send">Schedule send</string>
+    <string name="schedule_in_past">That time has passed. Pick a later one.</string>
+    <string name="next">Next</string>
+    <string name="ok">OK</string>
+    <string name="scheduled_for">Scheduled for %1$s</string>
+    <string name="scheduled_done">Scheduled for %1$s</string>
+    <string name="scheduled_cancelled">Scheduled message cancelled</string>
+    <string name="send_now">Send now</string>
+    <string name="change_time">Change time</string>
+    <string name="edit">Edit</string>
+    <string name="scheduled_title">Scheduled messages</string>
+    <string name="scheduled_empty">No scheduled messages</string>
+    <string name="scheduled_hint">Messages waiting to go out, soonest first</string>
+    <string name="scheduled_message">Scheduled message to %1$s, %2$s: %3$s</string>
+    <string name="settings_send_delay">Send delay</string>
+    <string name="settings_send_delay_off">Off</string>
+    <string name="settings_send_delay_hint">A sent message waits this long first, with a countdown and Cancel, so a mistake can be caught. Replies from a notification go at once.</string>
+    <string name="seconds_short">%1$d s</string>
+    <string name="sending_in">Sending in %1$d s</string>
 </resources>

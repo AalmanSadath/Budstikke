@@ -26,13 +26,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.aalman.budstikke.ui.clearFocusOnTap
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import dev.aalman.budstikke.settings.SettingsRepository
-import dev.aalman.budstikke.sms.SmsSender
+import dev.aalman.budstikke.sms.OutgoingQueue
 import dev.aalman.budstikke.sms.activeSims
 import dev.aalman.budstikke.sms.bodyOf
 import dev.aalman.budstikke.sms.parseRecipients
@@ -68,7 +70,6 @@ class ComposeActivity : ComponentActivity() {
             ?: bodyOf(ssp)
             ?: ""
         val sims = activeSims(this)
-        val sender = SmsSender(this)
 
         setContent {
             BudstikkeTheme {
@@ -95,7 +96,8 @@ class ComposeActivity : ComponentActivity() {
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
                     )
-                    Box(Modifier.weight(1f))
+                    // The empty space between the fields; tapping it takes the cursor away.
+                    Box(Modifier.weight(1f).fillMaxWidth().clearFocusOnTap(LocalFocusManager.current))
                     ComposeBar(
                         text = body,
                         onTextChange = { body = it },
@@ -106,7 +108,7 @@ class ComposeActivity : ComponentActivity() {
                             val recipients = parseRecipients(to)
                             val text = body.trim()
                             if (recipients.isNotEmpty() && text.isNotEmpty()) {
-                                send(sender, recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                                send(recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
                             }
                         },
                         modifier = Modifier.navigationBarsPadding(),
@@ -116,10 +118,15 @@ class ComposeActivity : ComponentActivity() {
         }
     }
 
-    private fun send(sender: SmsSender, recipients: List<String>, text: String, subscriptionId: Int) {
+    private fun send(recipients: List<String>, text: String, subscriptionId: Int) {
         lifecycleScope.launch {
             val thread = withContext(Dispatchers.IO) {
-                recipients.forEach { sender.send(it, text, subscriptionId) }
+                // Each recipient gets their own conversation, which shows the send delay's
+                // countdown when one is set.
+                recipients.forEach { recipient ->
+                    val thread = Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, recipient)
+                    OutgoingQueue.sendOrHold(this@ComposeActivity, thread, recipient, text, subscriptionId)
+                }
                 recipients.singleOrNull()?.let { Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, it) }
             }
             startActivity(
