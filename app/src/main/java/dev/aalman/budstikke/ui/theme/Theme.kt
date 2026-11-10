@@ -9,8 +9,13 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import dev.aalman.budstikke.settings.SettingsRepository
+import dev.aalman.budstikke.settings.ThemeMode
+import dev.aalman.budstikke.settings.ThemeSource
 
 /*
  * BifroSSH's three palettes (src/styles/tokens.css), mapped onto Material 3 roles.
@@ -20,8 +25,6 @@ import androidx.compose.ui.platform.LocalContext
  * each step along the ramp is the next surface container. Text on accent and danger keeps
  * the per-theme contrast choice BifroSSH made (on-accent, on-danger).
  */
-
-enum class Palette { Dynamic, BifrosshDark, BifrosshLight, BifrosshAmoled }
 
 val BifrosshDark: ColorScheme = darkColorScheme(
     primary = Color(0xFF58A6FF),
@@ -95,27 +98,57 @@ val BifrosshLight: ColorScheme = lightColorScheme(
     onError = Color(0xFFFFFFFF),
 )
 
+/** Whether this device can take colours from the wallpaper (Android 12 and later). */
+val dynamicColourAvailable: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
 /**
- * Dynamic colour where the system offers it (Android 12 and later), BifroSSH dark or light
- * otherwise, following the system's dark mode. A setting to pick the palette comes later.
+ * The app's colours, from the user's settings: wallpaper colours or BifroSSH's palettes,
+ * light or dark by the system or by hand, true black in dark mode if chosen, and a chosen
+ * accent over any of them. Reads the settings itself, so a change applies at once.
  */
 @Composable
-fun BudstikkeTheme(
-    palette: Palette = Palette.Dynamic,
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit,
-) {
+fun BudstikkeTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val scheme = when (palette) {
-        Palette.Dynamic -> when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            darkTheme -> BifrosshDark
-            else -> BifrosshLight
-        }
-        Palette.BifrosshDark -> BifrosshDark
-        Palette.BifrosshLight -> BifrosshLight
-        Palette.BifrosshAmoled -> BifrosshAmoled
+    val settings by SettingsRepository.get(context).settings.collectAsState()
+    val dark = when (settings.themeMode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
     }
+    var scheme = when {
+        settings.themeSource == ThemeSource.Dynamic && dynamicColourAvailable ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        !dark -> BifrosshLight
+        settings.trueBlack -> BifrosshAmoled
+        else -> BifrosshDark
+    }
+    // BifroSSH's AMOLED palette is already black; dynamic colour needs its surfaces taken there.
+    if (dark && settings.trueBlack && scheme !== BifrosshAmoled) scheme = scheme.trueBlack()
+    settings.accent?.let { scheme = scheme.withAccent(it) }
     MaterialTheme(colorScheme = scheme, content = content)
+}
+
+private fun ColorScheme.trueBlack(): ColorScheme = copy(
+    background = Color.Black,
+    surface = Color.Black,
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = Color(0xFF0A0A0A),
+    surfaceContainer = Color(0xFF0A0A0A),
+    surfaceContainerHigh = Color(0xFF111111),
+    surfaceContainerHighest = Color(0xFF1A1A1A),
+)
+
+/** Replaces the accent roles with a chosen colour and the text colour that reads on it. */
+private fun ColorScheme.withAccent(rgb: Int): ColorScheme {
+    val accent = Color(0xFF000000 or rgb.toLong())
+    val on = Color(0xFF000000 or onAccent(rgb).toLong())
+    val shade = Color(0xFF000000 or accentShade(rgb).toLong())
+    return copy(
+        primary = accent,
+        onPrimary = on,
+        secondary = shade,
+        onSecondary = Color(0xFF000000 or onAccent(accentShade(rgb)).toLong()),
+        inversePrimary = accent,
+        surfaceTint = accent,
+    )
 }

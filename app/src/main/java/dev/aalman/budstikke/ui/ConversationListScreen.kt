@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,10 +47,19 @@ fun ConversationListScreen(
     conversations: List<Conversation>?,
     onOpen: (Conversation) -> Unit,
     onNewMessage: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     Column(Modifier.fillMaxSize()) {
-        TopBar(stringResource(R.string.app_name))
+        TopBar(stringResource(R.string.app_name)) {
+            IconButton(onClick = onSettings, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_settings),
+                    contentDescription = stringResource(R.string.settings),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
         when {
             conversations == null -> Unit
             conversations.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
