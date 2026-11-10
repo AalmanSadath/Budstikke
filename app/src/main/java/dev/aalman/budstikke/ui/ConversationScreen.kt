@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,8 +53,20 @@ fun ConversationScreen(
             .imePadding(),
     ) {
         TopBar(title, onBack = onBack)
+        val listState = rememberLazyListState()
+        val newest = messages.lastOrNull()
+        // The list runs bottom up and keeps its place on the message it was showing, so a
+        // new one would land out of sight below. Bring it into view when it is one just sent,
+        // or when the newest was already showing; someone reading further up stays put.
+        // By the time this runs the new message has pushed the list's place down by one, so
+        // "was at the bottom" reads as index 1.
+        LaunchedEffect(newest?.id) {
+            val wasAtBottom = listState.firstVisibleItemIndex <= 1
+            if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
+        }
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
+            state = listState,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
