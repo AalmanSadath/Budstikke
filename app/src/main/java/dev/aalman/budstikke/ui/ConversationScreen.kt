@@ -130,6 +130,12 @@ fun ConversationScreen(
             val wasAtBottom = listState.firstVisibleItemIndex <= 1
             if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
         }
+        // A newly scheduled message is added below the rest the same way, out of sight
+        // below the list's place; bring it into view.
+        val newestPending = pending.maxOfOrNull { it.id }
+        LaunchedEffect(newestPending) {
+            if (newestPending != null) listState.animateScrollToItem(0)
+        }
         val focusManager = LocalFocusManager.current
         LazyColumn(
             Modifier
