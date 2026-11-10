@@ -1,14 +1,9 @@
 package dev.aalman.budstikke.data
 
 import android.content.Context
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
 import android.provider.Telephony
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -32,21 +27,10 @@ class ConversationRepository(context: Context) {
     private val resolver = context.applicationContext.contentResolver
 
     /** Emits the conversation list now and again whenever the SMS store changes. */
-    fun conversations(): Flow<List<Conversation>> = changes()
+    fun conversations(): Flow<List<Conversation>> = resolver.smsChanges()
         .conflate()
         .map { load() }
         .flowOn(Dispatchers.IO)
-
-    private fun changes(): Flow<Unit> = callbackFlow {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                trySend(Unit)
-            }
-        }
-        resolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
-        trySend(Unit)
-        awaitClose { resolver.unregisterContentObserver(observer) }
-    }
 
     private fun load(): List<Conversation> {
         val latest = LinkedHashMap<Long, Conversation>()
