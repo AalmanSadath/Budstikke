@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- Lists the active SIMs so a message can be sent on either. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
@@ -80,6 +81,11 @@
              PendingIntents reach it. -->
         <receiver
             android:name=".sms.SmsStatusReceiver"
+            android:exported="false" />
+
+        <!-- Reply and Mark as read on message notifications. -->
+        <receiver
+            android:name=".notify.NotificationActionReceiver"
             android:exported="false" />
 
         <!-- "Reply with message" on an incoming call. -->

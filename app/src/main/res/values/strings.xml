@@ -23,4 +23,9 @@
     <string name="state_failed">Not sent. Tap to retry.</string>
     <string name="message_from_them">Message received %1$s: %2$s</string>
     <string name="message_from_you">You sent %1$s: %2$s. %3$s</string>
+    <string name="channel_messages">Messages</string>
+    <string name="notification_you">You</string>
+    <string name="notification_reply">Reply</string>
+    <string name="notification_reply_hint">Reply</string>
+    <string name="notification_mark_read">Mark as read</string>
 </resources>

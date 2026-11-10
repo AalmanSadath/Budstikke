@@ -7,6 +7,7 @@ import android.content.Intent
 import android.provider.Telephony
 import android.telephony.SubscriptionManager
 import android.util.Log
+import dev.aalman.budstikke.notify.MessageNotifier
 import kotlin.concurrent.thread
 
 /**
@@ -55,7 +56,10 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             }
         }
         // The provider assigns the thread from the address.
-        context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
+        val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values) ?: return
+        val threadId = context.contentResolver.query(uri, arrayOf(Telephony.Sms.THREAD_ID), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null } ?: return
+        MessageNotifier(context).update(threadId)
     }
 
     private companion object {

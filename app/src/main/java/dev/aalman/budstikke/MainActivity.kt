@@ -5,6 +5,7 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.telephony.SubscriptionManager
 import androidx.activity.ComponentActivity
@@ -13,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,9 +22,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
+import dev.aalman.budstikke.notify.ActiveConversation
+import dev.aalman.budstikke.notify.MessageNotifier
 import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.sms.SmsSender
 import dev.aalman.budstikke.sms.activeSims
@@ -49,8 +57,8 @@ class MainActivity : ComponentActivity() {
             refreshRole()
         }
 
-    private val requestPhoneState =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    private val requestPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             sims = activeSims(this)
         }
 
@@ -112,17 +120,21 @@ class MainActivity : ComponentActivity() {
     private fun refreshRole() {
         isDefaultSmsApp = roleManager.isRoleHeld(RoleManager.ROLE_SMS)
         if (!isDefaultSmsApp) return
-        // Reading phone state is what lists the SIMs. Without it, everything still works
-        // and sends on the system's default SIM.
-        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
-            sims = activeSims(this)
-        } else if (!askedForPhoneState) {
-            askedForPhoneState = true
-            requestPhoneState.launch(Manifest.permission.READ_PHONE_STATE)
+        sims = activeSims(this)
+        // Phone state lists the SIMs; without it messages go out on the system's default
+        // SIM. Notifications need asking for from Android 13. Both are asked for once per
+        // launch, and everything else works if they are refused.
+        val missing = buildList {
+            add(Manifest.permission.READ_PHONE_STATE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty() && !askedForPermissions) {
+            askedForPermissions = true
+            requestPermissions.launch(missing.toTypedArray())
         }
     }
 
-    private var askedForPhoneState = false
+    private var askedForPermissions = false
 
     private fun threadFrom(intent: Intent?): OpenThread? {
         val threadId = intent?.getLongExtra(EXTRA_THREAD_ID, -1L) ?: -1L
@@ -161,8 +173,28 @@ private fun ConversationRoute(
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
     val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription } ?: preferredSim(sims)
 
-    // Anything that arrives while the conversation is on screen has been seen.
-    LaunchedEffect(thread.threadId, messages.size) { repository.markRead(thread.threadId) }
+    // While the conversation is on screen, what arrives in it is seen: no notification,
+    // and it is marked read. Leaving the screen or the app ends that.
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(thread.threadId, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> ActiveConversation.threadId = thread.threadId
+                Lifecycle.Event.ON_PAUSE -> ActiveConversation.threadId = null
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            if (ActiveConversation.threadId == thread.threadId) ActiveConversation.threadId = null
+        }
+    }
+    LaunchedEffect(thread.threadId, messages.size) {
+        repository.markRead(thread.threadId)
+        MessageNotifier(context).cancel(thread.threadId)
+    }
 
     ConversationScreen(
         title = thread.address,
