@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.HorizontalDivider
@@ -32,7 +34,12 @@ import dev.aalman.budstikke.R
  * arrow, when there is one, sits 4 dp in from the corner as BifroSSH's does.
  */
 @Composable
-fun TopBar(title: String, modifier: Modifier = Modifier, onBack: (() -> Unit)? = null) {
+fun TopBar(
+    title: String,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
+) {
     Column(
         modifier
             .fillMaxWidth()
@@ -54,6 +61,10 @@ fun TopBar(title: String, modifier: Modifier = Modifier, onBack: (() -> Unit)? =
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
+            }
+            if (leading != null) {
+                Spacer(Modifier.width(4.dp))
+                leading()
             }
             Text(
                 text = title,

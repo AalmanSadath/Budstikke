@@ -101,18 +101,18 @@ private fun ConversationRow(conversation: Conversation, onOpen: (Conversation) -
             .clickable { onOpen(conversation) }
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .semantics(mergeDescendants = true) {
-                contentDescription = listOf(conversation.address, unreadLabel, snippet, time)
+                contentDescription = listOf(conversation.title, unreadLabel, snippet, time)
                     .filter { it.isNotEmpty() }
                     .joinToString(", ")
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(conversation.address)
+        Avatar(conversation.address, conversation.contact)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    conversation.address,
+                    conversation.title,
                     Modifier.weight(1f),
                     fontSize = 16.sp,
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
@@ -170,23 +170,5 @@ private fun UnreadBadge(count: Int) {
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onPrimary,
         )
-    }
-}
-
-/** Avatar colours. Picked from the sender so a conversation keeps its colour. */
-private val avatarColours = listOf(
-    Color(0xFF3B82F6), Color(0xFF8B5CF6), Color(0xFFEC4899), Color(0xFFF59E0B),
-    Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFFEF4444), Color(0xFF6366F1),
-)
-
-@Composable
-private fun Avatar(address: String) {
-    val initial = address.firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "#"
-    val colour = avatarColours[Math.floorMod(address.hashCode(), avatarColours.size)]
-    Box(
-        Modifier.size(44.dp).clip(CircleShape).background(colour),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(initial, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     }
 }
