@@ -27,6 +27,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.selected
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,6 +66,7 @@ fun ConversationListScreen(
     onPin: (Set<Long>, Boolean) -> Unit,
     onArchive: (Set<Long>, Boolean) -> Unit,
     onDelete: (List<Conversation>) -> Unit,
+    onBlock: (List<Conversation>) -> Unit,
     onBack: (() -> Unit)? = null,
     onNewMessage: (() -> Unit)? = null,
     onShowArchive: (() -> Unit)? = null,
@@ -90,6 +95,11 @@ fun ConversationListScreen(
                     }
                 },
             ) {
+                // Left of the rest, so adding it moves none of the buttons that were there.
+                BarAction(R.drawable.ic_block, R.string.block_number) {
+                    onBlock(chosen)
+                    selected = emptySet()
+                }
                 BarAction(
                     if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
                     if (archive) R.string.unarchive else R.string.archive,
@@ -195,10 +205,23 @@ private fun ConversationRow(
     } else {
         ""
     }
-    val snippet = if (conversation.lastFromMe) {
-        stringResource(R.string.you_prefix, conversation.snippet)
+    // An unsent draft stands in for the last message, as it is what was left to do here.
+    val draft = conversation.draft
+    val draftLabel = stringResource(R.string.draft_label)
+    val snippet = when {
+        draft != null -> "$draftLabel $draft"
+        conversation.lastFromMe -> stringResource(R.string.you_prefix, conversation.snippet)
+        else -> conversation.snippet
+    }
+    val primary = MaterialTheme.colorScheme.primary
+    val shownSnippet = if (draft != null) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = primary, fontWeight = FontWeight.SemiBold)) { append(draftLabel) }
+            append(" ")
+            append(draft)
+        }
     } else {
-        conversation.snippet
+        AnnotatedString(snippet)
     }
     val time = listTime(LocalContext.current, conversation.dateMillis)
     Row(
@@ -252,7 +275,7 @@ private fun ConversationRow(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    snippet,
+                    shownSnippet,
                     Modifier.weight(1f),
                     fontSize = 14.sp,
                     fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,

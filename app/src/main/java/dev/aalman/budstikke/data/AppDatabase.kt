@@ -23,10 +23,26 @@ class AppDatabase private constructor(context: Context) :
             """.trimIndent(),
         )
         createTrash(db)
+        createBlocks(db)
+        createDrafts(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createTrash(db)
+        if (oldVersion < 3) createBlocks(db)
+        if (oldVersion < 4) createDrafts(db)
+    }
+
+    /** Text typed in a conversation and not sent yet, one per conversation. */
+    private fun createDrafts(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE drafts (thread_id INTEGER PRIMARY KEY, body TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+        )
+    }
+
+    /** Numbers and sender names whose messages are kept out of sight and never notify. */
+    private fun createBlocks(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE blocked_numbers (address TEXT PRIMARY KEY, blocked_at INTEGER NOT NULL)")
     }
 
     /**
@@ -71,7 +87,7 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         private const val NAME = "budstikke.db"
-        private const val VERSION = 2
+        private const val VERSION = 4
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

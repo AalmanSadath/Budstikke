@@ -69,6 +69,8 @@ fun ConversationScreen(
     onArchiveChange: (Boolean) -> Unit,
     onDeleteMessages: (Set<Long>) -> Unit,
     onDeleteConversation: () -> Unit,
+    blocked: Boolean,
+    onBlockChange: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
@@ -105,7 +107,7 @@ fun ConversationScreen(
             }
         } else {
             TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
-                ConversationMenu(flags, onPinChange, onArchiveChange, onDeleteConversation)
+                ConversationMenu(flags, blocked, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
             }
         }
         val listState = rememberLazyListState()
@@ -236,13 +238,15 @@ private fun Bubble(
     }
 }
 
-/** Pin, archive and delete for the open conversation. Pinning is offered only outside the archive. */
+/** Pin, archive, block and delete for the open conversation. Pinning is offered only outside the archive. */
 @Composable
 private fun ConversationMenu(
     flags: Flags,
+    blocked: Boolean,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
     onDelete: () -> Unit,
+    onBlockChange: (Boolean) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -254,7 +258,9 @@ private fun ConversationMenu(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (!flags.archived) {
+            // A blocked conversation lives only in Spam & blocked, so pins and the archive
+            // have nothing to act on until it is unblocked.
+            if (!flags.archived && !blocked) {
                 DropdownMenuItem(
                     text = { Text(stringResource(if (flags.pinned) R.string.unpin else R.string.pin)) },
                     leadingIcon = { Icon(painterResource(R.drawable.ic_pin), null) },
@@ -264,7 +270,7 @@ private fun ConversationMenu(
                     },
                 )
             }
-            DropdownMenuItem(
+            if (!blocked) DropdownMenuItem(
                 text = { Text(stringResource(if (flags.archived) R.string.unarchive else R.string.archive)) },
                 leadingIcon = {
                     Icon(painterResource(if (flags.archived) R.drawable.ic_unarchive else R.drawable.ic_archive), null)
@@ -272,6 +278,14 @@ private fun ConversationMenu(
                 onClick = {
                     open = false
                     onArchiveChange(!flags.archived)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(if (blocked) R.string.unblock_number else R.string.block_number)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_block), null) },
+                onClick = {
+                    open = false
+                    onBlockChange(!blocked)
                 },
             )
             DropdownMenuItem(

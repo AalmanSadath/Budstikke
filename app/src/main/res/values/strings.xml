@@ -104,4 +104,20 @@
         <item quantity="one">Restored</item>
         <item quantity="other">%1$d restored</item>
     </plurals>
+    <string name="block_number">Block number</string>
+    <string name="unblock_number">Unblock number</string>
+    <string name="blocked_title">Spam &amp; blocked</string>
+    <string name="blocked_hint">Messages from these numbers are kept here, marked read, and never notify.</string>
+    <string name="blocked_empty">No blocked numbers</string>
+    <string name="blocked_no_messages">No messages</string>
+    <string name="blocked_done">%1$s blocked</string>
+    <string name="unblocked_done">%1$s unblocked</string>
+    <string name="open">Open</string>
+    <string name="settings_blocking">Blocking</string>
+    <string name="settings_blocked_hint">Blocked numbers and the messages they sent</string>
+    <plurals name="blocked_count">
+        <item quantity="one">%1$d number blocked</item>
+        <item quantity="other">%1$d numbers blocked</item>
+    </plurals>
+    <string name="draft_label">Draft:</string>
 </resources>

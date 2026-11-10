@@ -32,6 +32,12 @@ import dev.aalman.budstikke.data.Trash
 import dev.aalman.budstikke.ui.TrashScreen
 import dev.aalman.budstikke.ui.UndoQueue
 import kotlinx.coroutines.CoroutineScope
+import dev.aalman.budstikke.data.BlockList
+import dev.aalman.budstikke.data.Folder
+import dev.aalman.budstikke.ui.BlockedScreen
+import androidx.compose.runtime.rememberUpdatedState
+import dev.aalman.budstikke.data.Drafts
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private var showSettings by mutableStateOf(false)
     private var showArchive by mutableStateOf(false)
     private var showTrash by mutableStateOf(false)
+    private var showBlocked by mutableStateOf(false)
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -103,6 +110,7 @@ class MainActivity : ComponentActivity() {
         showSettings = savedInstanceState?.getBoolean(STATE_SETTINGS) ?: false
         showArchive = savedInstanceState?.getBoolean(STATE_ARCHIVE) ?: false
         showTrash = savedInstanceState?.getBoolean(STATE_TRASH) ?: false
+        showBlocked = savedInstanceState?.getBoolean(STATE_BLOCKED) ?: false
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -124,9 +132,18 @@ class MainActivity : ComponentActivity() {
                         requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS))
                     }
                     thread != null -> ConversationRoute(thread, messages, sender, sims, undo) { openThread = null }
+                    showBlocked -> {
+                        BackHandler { showBlocked = false }
+                        BlockedRoute(
+                            conversations,
+                            undo,
+                            onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                            onBack = { showBlocked = false },
+                        )
+                    }
                     showSettings -> {
                         BackHandler { showSettings = false }
-                        SettingsScreen(sims = sims, onBack = { showSettings = false })
+                        SettingsScreen(sims = sims, onShowBlocked = { showBlocked = true }, onBack = { showSettings = false })
                     }
                     showTrash -> {
                         BackHandler { showTrash = false }
@@ -184,6 +201,7 @@ class MainActivity : ComponentActivity() {
         outState.putBoolean(STATE_SETTINGS, showSettings)
         outState.putBoolean(STATE_ARCHIVE, showArchive)
         outState.putBoolean(STATE_TRASH, showTrash)
+        outState.putBoolean(STATE_BLOCKED, showBlocked)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -225,6 +243,7 @@ class MainActivity : ComponentActivity() {
         private const val STATE_SETTINGS = "settings"
         private const val STATE_ARCHIVE = "archive"
         private const val STATE_TRASH = "trash"
+        private const val STATE_BLOCKED = "blocked"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -234,6 +253,9 @@ class MainActivity : ComponentActivity() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
+
+/** How long typing must pause before the draft is saved. */
+private const val DRAFT_SAVE_DELAY_MILLIS = 500L
 
 @Composable
 private fun ConversationRoute(
@@ -250,6 +272,25 @@ private fun ConversationRoute(
     val flow = remember(thread.threadId) { repository.messages(thread.threadId) }
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
+    // Unsent text is kept as a draft: filled in when the conversation opens, saved shortly
+    // after typing stops, and saved at once when the screen or the app is left.
+    val drafts = remember { Drafts.get(context) }
+    var draftLoaded by rememberSaveable(thread.threadId) { mutableStateOf(false) }
+    LaunchedEffect(thread.threadId) {
+        if (!draftLoaded) {
+            val saved = withContext(Dispatchers.IO) { drafts.get(thread.threadId) }
+            if (text.isEmpty() && saved != null) text = saved
+            draftLoaded = true
+        }
+    }
+    LaunchedEffect(thread.threadId, text, draftLoaded) {
+        if (!draftLoaded) return@LaunchedEffect
+        delay(DRAFT_SAVE_DELAY_MILLIS)
+        drafts.put(thread.threadId, text)
+    }
+    val latestText by rememberUpdatedState(text)
+    val latestLoaded by rememberUpdatedState(draftLoaded)
+    val saveDraft = { if (latestLoaded) drafts.put(thread.threadId, latestText) }
     var chosenSubscription by rememberSaveable(thread.threadId) { mutableStateOf<Int?>(null) }
     val settings by SettingsRepository.get(context).settings.collectAsState()
     val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription }
@@ -258,6 +299,10 @@ private fun ConversationRoute(
     val flagStore = remember { ConversationFlags.get(context) }
     val trash = remember { Trash.get(context) }
     val resources = LocalResources.current
+    val blockList = remember { BlockList.get(context) }
+    val blocked by produceState(false, thread.address) {
+        blockList.changes().collect { value = withContext(Dispatchers.IO) { blockList.isBlocked(thread.address) } }
+    }
     val flags by produceState(Flags(), thread.threadId) {
         flagStore.changes().collect { value = withContext(Dispatchers.IO) { flagStore.of(thread.threadId) } }
     }
@@ -275,13 +320,17 @@ private fun ConversationRoute(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> ActiveConversation.threadId = thread.threadId
-                Lifecycle.Event.ON_PAUSE -> ActiveConversation.threadId = null
+                Lifecycle.Event.ON_PAUSE -> {
+                    ActiveConversation.threadId = null
+                    saveDraft()
+                }
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            saveDraft()
             if (ActiveConversation.threadId == thread.threadId) ActiveConversation.threadId = null
         }
     }
@@ -326,6 +375,17 @@ private fun ConversationRoute(
                 }
             }
         },
+        blocked = blocked,
+        onBlockChange = { block ->
+            if (block) {
+                val title = contact?.name ?: thread.address
+                blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
+                // The conversation moves to Spam & blocked, out of the list it was opened from.
+                onBack()
+            } else {
+                scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
+            }
+        },
         onDeleteConversation = {
             deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
             onBack()
@@ -355,7 +415,7 @@ private fun ConversationListRoute(
     val scope = rememberCoroutineScope()
     val flagStore = remember { ConversationFlags.get(context) }
     val trash = remember { Trash.get(context) }
-    val flow = remember(archive) { repository.conversations(archived = archive) }
+    val flow = remember(archive) { repository.conversations(if (archive) Folder.Archive else Folder.Main) }
     val list by flow.collectAsStateWithLifecycle(initialValue = null)
     ConversationListScreen(
         conversations = list,
@@ -372,6 +432,9 @@ private fun ConversationListRoute(
                 )
                 undo.push(message) { flagStore.restore(before) }
             }
+        },
+        onBlock = { chosen ->
+            blockConversations(scope, undo, resources, context, chosen.map { Triple(it.threadId, it.address, it.title) })
         },
         onDelete = { chosen ->
             deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to it.address }, context)
@@ -402,6 +465,61 @@ private fun deleteConversations(
             trash.restore(items.asReversed())
         }
     }
+}
+
+/**
+ * Blocks the senders of conversations, given as thread, address and title; marks what they
+ * sent read, as a message arriving while blocked is, clears their notifications, and offers
+ * undo.
+ */
+private fun blockConversations(
+    scope: CoroutineScope,
+    undo: UndoQueue,
+    resources: Resources,
+    context: Context,
+    threads: List<Triple<Long, String, String>>,
+) {
+    val blockList = BlockList.get(context)
+    val messages = MessageRepository(context)
+    val notifier = MessageNotifier(context)
+    scope.launch {
+        withContext(Dispatchers.IO) {
+            threads.forEach { (threadId, address) ->
+                blockList.block(address)
+                messages.markRead(threadId)
+            }
+        }
+        threads.forEach { notifier.cancel(it.first) }
+        val message = threads.singleOrNull()?.let { resources.getString(R.string.blocked_done, it.third) }
+            ?: resources.getQuantityString(R.plurals.blocked_count, threads.size, threads.size)
+        undo.push(message) { threads.forEach { blockList.unblock(it.second) } }
+    }
+}
+
+@Composable
+private fun BlockedRoute(
+    repository: ConversationRepository,
+    undo: UndoQueue,
+    onOpen: (Conversation) -> Unit,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val blockList = remember { BlockList.get(context) }
+    val flow = remember { repository.blocked() }
+    val entries by flow.collectAsStateWithLifecycle(initialValue = null)
+    BlockedScreen(
+        entries = entries,
+        onOpen = onOpen,
+        onUnblock = { entry ->
+            scope.launch {
+                withContext(Dispatchers.IO) { blockList.unblock(entry.address) }
+                undo.push(resources.getString(R.string.unblocked_done, entry.title)) { blockList.block(entry.address) }
+            }
+        },
+        onBack = onBack,
+    )
 }
 
 @Composable

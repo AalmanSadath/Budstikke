@@ -7,6 +7,7 @@ import android.content.Intent
 import android.provider.Telephony
 import android.telephony.SubscriptionManager
 import android.util.Log
+import dev.aalman.budstikke.data.BlockList
 import dev.aalman.budstikke.notify.MessageNotifier
 import kotlin.concurrent.thread
 
@@ -44,19 +45,23 @@ class SmsDeliverReceiver : BroadcastReceiver() {
     }
 
     private fun store(context: Context, sms: IncomingSms, subscriptionId: Int) {
+        // A blocked sender's message is still kept, as read, so it waits silently in
+        // Spam & blocked and nothing counts it as unread.
+        val blocked = BlockList.get(context).isBlocked(sms.address)
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, sms.address)
             put(Telephony.Sms.BODY, sms.body)
             put(Telephony.Sms.DATE, System.currentTimeMillis())
             put(Telephony.Sms.DATE_SENT, sms.sentAtMillis)
-            put(Telephony.Sms.READ, 0)
-            put(Telephony.Sms.SEEN, 0)
+            put(Telephony.Sms.READ, if (blocked) 1 else 0)
+            put(Telephony.Sms.SEEN, if (blocked) 1 else 0)
             if (subscriptionId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
                 put(Telephony.Sms.SUBSCRIPTION_ID, subscriptionId)
             }
         }
         // The provider assigns the thread from the address.
         val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values) ?: return
+        if (blocked) return
         val threadId = context.contentResolver.query(uri, arrayOf(Telephony.Sms.THREAD_ID), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null } ?: return
         MessageNotifier(context).update(threadId)
