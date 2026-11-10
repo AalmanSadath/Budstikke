@@ -34,8 +34,6 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -61,13 +59,14 @@ import dev.aalman.budstikke.data.Conversation
 fun ConversationListScreen(
     conversations: List<Conversation>?,
     archive: Boolean,
-    snackbar: SnackbarHostState,
     onOpen: (Conversation) -> Unit,
     onPin: (Set<Long>, Boolean) -> Unit,
     onArchive: (Set<Long>, Boolean) -> Unit,
+    onDelete: (List<Conversation>) -> Unit,
     onBack: (() -> Unit)? = null,
     onNewMessage: (() -> Unit)? = null,
     onShowArchive: (() -> Unit)? = null,
+    onShowTrash: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
 ) {
     var selected by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf(emptySet<Long>()) }
@@ -92,6 +91,19 @@ fun ConversationListScreen(
                     }
                 },
             ) {
+                BarAction(
+                    if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
+                    if (archive) R.string.unarchive else R.string.archive,
+                ) {
+                    onArchive(selected, !archive)
+                    selected = emptySet()
+                }
+                BarAction(R.drawable.ic_delete, R.string.delete) {
+                    onDelete(chosen)
+                    selected = emptySet()
+                }
+                // Pin takes the settings button's place, so archive and delete sit where
+                // Archived and Trash were and nothing moves when selecting starts.
                 if (!archive) {
                     // Pin unless every selected row is pinned already, as other mail and
                     // message apps do with a mixed selection.
@@ -101,17 +113,11 @@ fun ConversationListScreen(
                         selected = emptySet()
                     }
                 }
-                BarAction(
-                    if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
-                    if (archive) R.string.unarchive else R.string.archive,
-                ) {
-                    onArchive(selected, !archive)
-                    selected = emptySet()
-                }
             }
         } else {
             TopBar(stringResource(if (archive) R.string.archived else R.string.app_name), onBack = onBack) {
                 onShowArchive?.let { BarAction(R.drawable.ic_archive, R.string.archived, it) }
+                onShowTrash?.let { BarAction(R.drawable.ic_delete, R.string.trash, it) }
                 onSettings?.let { BarAction(R.drawable.ic_settings, R.string.settings, it) }
             }
         }
@@ -158,17 +164,11 @@ fun ConversationListScreen(
                 Icon(painterResource(R.drawable.ic_edit), contentDescription = stringResource(R.string.new_message))
             }
         }
-        SnackbarHost(
-            snackbar,
-            Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
-        )
     }
 }
 
 @Composable
-private fun BarAction(icon: Int, label: Int, onClick: () -> Unit) {
+internal fun BarAction(icon: Int, label: Int, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
         Icon(painterResource(icon), stringResource(label), tint = MaterialTheme.colorScheme.onSurface)
     }

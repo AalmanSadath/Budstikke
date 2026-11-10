@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Shows saved contacts' names and photos instead of bare numbers. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Sets the daily alarm that empties expired trash again after a restart. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
@@ -89,6 +91,17 @@
         <receiver
             android:name=".notify.NotificationActionReceiver"
             android:exported="false" />
+
+        <!-- Empties trash older than 30 days once a day; set again after a restart or an
+             update, which clear alarms. -->
+        <receiver
+            android:name=".trash.TrashPurgeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- "Reply with message" on an incoming call. -->
         <service

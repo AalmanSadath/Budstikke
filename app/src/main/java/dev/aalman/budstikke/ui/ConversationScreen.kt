@@ -1,7 +1,8 @@
 package dev.aalman.budstikke.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +20,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import dev.aalman.budstikke.data.Flags
 import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.setValue
@@ -61,16 +67,46 @@ fun ConversationScreen(
     flags: Flags,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
+    onDeleteMessages: (Set<Long>) -> Unit,
+    onDeleteConversation: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // Long-pressing a bubble starts selecting messages; taps then add or remove them.
+    var selected by rememberSaveable(address, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
+    LaunchedEffect(messages) {
+        val present = messages.mapTo(HashSet()) { it.id }
+        if (!present.containsAll(selected)) selected = selected intersect present
+    }
+    val selecting = selected.isNotEmpty()
+    BackHandler(enabled = selecting) { selected = emptySet() }
     Column(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .imePadding(),
     ) {
-        TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
-            ConversationMenu(flags, onPinChange, onArchiveChange)
+        if (selecting) {
+            TopBar(
+                pluralStringResource(R.plurals.selected_count, selected.size, selected.size),
+                leading = {
+                    IconButton(onClick = { selected = emptySet() }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            painterResource(R.drawable.ic_close),
+                            stringResource(R.string.clear_selection),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                },
+            ) {
+                BarAction(R.drawable.ic_delete, R.string.delete) {
+                    onDeleteMessages(selected)
+                    selected = emptySet()
+                }
+            }
+        } else {
+            TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
+                ConversationMenu(flags, onPinChange, onArchiveChange, onDeleteConversation)
+            }
         }
         val listState = rememberLazyListState()
         val newest = messages.lastOrNull()
@@ -91,7 +127,19 @@ fun ConversationScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             items(messages.asReversed(), key = { it.id }) { message ->
-                Bubble(message, simLabel = sims.labelFor(message), onRetry = onRetry)
+                val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
+                Bubble(
+                    message,
+                    simLabel = sims.labelFor(message),
+                    isSelected = message.id in selected,
+                    onClick = {
+                        when {
+                            selecting -> toggle()
+                            message.state == MessageState.Failed -> onRetry(message)
+                        }
+                    },
+                    onLongClick = toggle,
+                )
             }
         }
         ComposeBar(
@@ -111,7 +159,13 @@ private fun List<Sim>.labelFor(message: Message): String? =
     if (size > 1 && !message.isOutgoing) firstOrNull { it.subscriptionId == message.subscriptionId }?.slotLabel else null
 
 @Composable
-private fun Bubble(message: Message, simLabel: String?, onRetry: (Message) -> Unit) {
+private fun Bubble(
+    message: Message,
+    simLabel: String?,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val context = LocalContext.current
     val outgoing = message.isOutgoing
     val failed = message.state == MessageState.Failed
@@ -128,11 +182,18 @@ private fun Bubble(message: Message, simLabel: String?, onRetry: (Message) -> Un
     } else {
         stringResource(R.string.message_from_them, time, message.body)
     }
+    val primary = MaterialTheme.colorScheme.primary
     Column(
         Modifier
             .fillMaxWidth()
-            .clearAndSetSemantics { contentDescription = description }
-            .then(if (failed) Modifier.clickable { onRetry(message) } else Modifier),
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) primary.copy(alpha = 0.15f) else Color.Transparent)
+            .clearAndSetSemantics {
+                contentDescription = description
+                selected = isSelected
+            }
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(2.dp),
         horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
     ) {
         val shape = RoundedCornerShape(
@@ -175,12 +236,13 @@ private fun Bubble(message: Message, simLabel: String?, onRetry: (Message) -> Un
     }
 }
 
-/** Pin and archive for the open conversation. Pinning is offered only outside the archive. */
+/** Pin, archive and delete for the open conversation. Pinning is offered only outside the archive. */
 @Composable
 private fun ConversationMenu(
     flags: Flags,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
+    onDelete: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -212,6 +274,19 @@ private fun ConversationMenu(
                     onArchiveChange(!flags.archived)
                 },
             )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.delete_conversation)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_delete), null) },
+                onClick = {
+                    open = false
+                    onDelete()
+                },
+            )
         }
     }
 }
+
+private val MessageSelectionSaver = Saver<Set<Long>, LongArray>(
+    save = { it.toLongArray() },
+    restore = { it.toSet() },
+)

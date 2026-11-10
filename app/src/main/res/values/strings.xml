@@ -72,4 +72,36 @@
         <item quantity="other">%1$d conversations unarchived</item>
     </plurals>
     <string name="undo">Undo</string>
+    <string name="delete">Delete</string>
+    <string name="delete_conversation">Delete conversation</string>
+    <string name="trash">Trash</string>
+    <string name="trash_empty">Trash is empty</string>
+    <string name="trash_hint">Deleted conversations and messages stay here for 30 days, then are removed for good.</string>
+    <string name="trash_empty_action">Empty trash</string>
+    <string name="trash_empty_confirm">Delete everything in the trash for good?</string>
+    <string name="trash_delete_forever">Delete for good</string>
+    <string name="trash_delete_forever_confirm">Delete this for good? It cannot be restored.</string>
+    <string name="restore">Restore</string>
+    <string name="cancel">Cancel</string>
+    <string name="trash_deleted">Deleted %1$s</string>
+    <plurals name="trash_days_left">
+        <item quantity="one">removed in %1$d day</item>
+        <item quantity="other">removed in %1$d days</item>
+    </plurals>
+    <plurals name="trash_messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="deleted_conversations">
+        <item quantity="one">Conversation moved to trash</item>
+        <item quantity="other">%1$d conversations moved to trash</item>
+    </plurals>
+    <plurals name="deleted_messages">
+        <item quantity="one">Message moved to trash</item>
+        <item quantity="other">%1$d messages moved to trash</item>
+    </plurals>
+    <plurals name="restored_count">
+        <item quantity="one">Restored</item>
+        <item quantity="other">%1$d restored</item>
+    </plurals>
 </resources>

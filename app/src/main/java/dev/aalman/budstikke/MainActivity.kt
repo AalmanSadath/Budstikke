@@ -13,12 +13,25 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import dev.aalman.budstikke.data.Conversation
 import dev.aalman.budstikke.data.ConversationFlags
 import dev.aalman.budstikke.data.Flags
+import android.content.res.Resources
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import dev.aalman.budstikke.data.Trash
+import dev.aalman.budstikke.ui.TrashScreen
+import dev.aalman.budstikke.ui.UndoQueue
+import kotlinx.coroutines.CoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -66,6 +79,7 @@ class MainActivity : ComponentActivity() {
     private var openThread by mutableStateOf<OpenThread?>(null)
     private var showSettings by mutableStateOf(false)
     private var showArchive by mutableStateOf(false)
+    private var showTrash by mutableStateOf(false)
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -88,6 +102,7 @@ class MainActivity : ComponentActivity() {
         } ?: threadFrom(intent)
         showSettings = savedInstanceState?.getBoolean(STATE_SETTINGS) ?: false
         showArchive = savedInstanceState?.getBoolean(STATE_ARCHIVE) ?: false
+        showTrash = savedInstanceState?.getBoolean(STATE_TRASH) ?: false
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -97,19 +112,31 @@ class MainActivity : ComponentActivity() {
         setContent {
             BudstikkeTheme {
                 val thread = openThread
+                // One undo queue above every screen, so a deletion made in a conversation
+                // can still be undone from the list it returns to.
+                val scope = rememberCoroutineScope()
+                val snackbar = remember { SnackbarHostState() }
+                val undoLabel = stringResource(R.string.undo)
+                val undo = remember(undoLabel) { UndoQueue(scope, snackbar, undoLabel) }
+                Box(Modifier.fillMaxSize()) {
                 when {
                     !isDefaultSmsApp -> RoleScreen(roleAvailable) {
                         requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS))
                     }
-                    thread != null -> ConversationRoute(thread, messages, sender, sims) { openThread = null }
+                    thread != null -> ConversationRoute(thread, messages, sender, sims, undo) { openThread = null }
                     showSettings -> {
                         BackHandler { showSettings = false }
                         SettingsScreen(sims = sims, onBack = { showSettings = false })
+                    }
+                    showTrash -> {
+                        BackHandler { showTrash = false }
+                        TrashRoute(undo) { showTrash = false }
                     }
                     showArchive -> {
                         BackHandler { showArchive = false }
                         ConversationListRoute(
                             conversations,
+                            undo,
                             archive = true,
                             onOpen = { openThread = OpenThread(it.threadId, it.address) },
                             onBack = { showArchive = false },
@@ -117,11 +144,23 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> ConversationListRoute(
                         conversations,
+                        undo,
                         archive = false,
                         onOpen = { openThread = OpenThread(it.threadId, it.address) },
-                        onNewMessage = { startActivity(Intent(this, ComposeActivity::class.java)) },
+                        onNewMessage = { startActivity(Intent(this@MainActivity, ComposeActivity::class.java)) },
                         onShowArchive = { showArchive = true },
+                        onShowTrash = { showTrash = true },
                         onSettings = { showSettings = true },
+                    )
+                }
+                    SnackbarHost(
+                        snackbar,
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .imePadding()
+                            // Clear of the message field when a conversation is open.
+                            .padding(bottom = if (thread != null) 64.dp else 0.dp),
                     )
                 }
             }
@@ -144,6 +183,7 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_SETTINGS, showSettings)
         outState.putBoolean(STATE_ARCHIVE, showArchive)
+        outState.putBoolean(STATE_TRASH, showTrash)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -184,6 +224,7 @@ class MainActivity : ComponentActivity() {
         private const val STATE_ADDRESS = "address"
         private const val STATE_SETTINGS = "settings"
         private const val STATE_ARCHIVE = "archive"
+        private const val STATE_TRASH = "trash"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -200,6 +241,7 @@ private fun ConversationRoute(
     repository: MessageRepository,
     sender: SmsSender,
     sims: List<Sim>,
+    undo: UndoQueue,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -214,6 +256,8 @@ private fun ConversationRoute(
         ?: preferredSim(sims, settings.defaultSubscriptionId)
     val contacts = remember { ContactRepository.get(context) }
     val flagStore = remember { ConversationFlags.get(context) }
+    val trash = remember { Trash.get(context) }
+    val resources = LocalResources.current
     val flags by produceState(Flags(), thread.threadId) {
         flagStore.changes().collect { value = withContext(Dispatchers.IO) { flagStore.of(thread.threadId) } }
     }
@@ -273,35 +317,49 @@ private fun ConversationRoute(
             // An archived conversation leaves the list it was opened from, so go back to it.
             if (archived) onBack()
         },
+        onDeleteMessages = { ids ->
+            scope.launch {
+                val item = withContext(Dispatchers.IO) { trash.deleteMessages(thread.address, ids) }
+                    ?: return@launch
+                undo.push(resources.getQuantityString(R.plurals.deleted_messages, ids.size, ids.size)) {
+                    trash.restore(listOf(item))
+                }
+            }
+        },
+        onDeleteConversation = {
+            deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
+            onBack()
+        },
         onBack = onBack,
     )
 }
 
 /**
- * The main list or the archive, with pinning and archiving. Archiving or unarchiving from
- * the list offers undo, which puts pins back too.
+ * The main list or the archive, with pinning, archiving and deleting. Archiving,
+ * unarchiving and deleting offer undo; undoing an archive puts pins back too.
  */
 @Composable
 private fun ConversationListRoute(
     repository: ConversationRepository,
+    undo: UndoQueue,
     archive: Boolean,
     onOpen: (Conversation) -> Unit,
     onBack: (() -> Unit)? = null,
     onNewMessage: (() -> Unit)? = null,
     onShowArchive: (() -> Unit)? = null,
+    onShowTrash: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val flagStore = remember { ConversationFlags.get(context) }
+    val trash = remember { Trash.get(context) }
     val flow = remember(archive) { repository.conversations(archived = archive) }
     val list by flow.collectAsStateWithLifecycle(initialValue = null)
-    val snackbar = remember { SnackbarHostState() }
-    val resources = LocalResources.current
     ConversationListScreen(
         conversations = list,
         archive = archive,
-        snackbar = snackbar,
         onOpen = onOpen,
         onPin = { ids, pinned -> scope.launch(Dispatchers.IO) { flagStore.setPinned(ids, pinned) } },
         onArchive = { ids, archived ->
@@ -312,20 +370,57 @@ private fun ConversationListRoute(
                     ids.size,
                     ids.size,
                 )
-                snackbar.currentSnackbarData?.dismiss()
-                val result = snackbar.showSnackbar(
-                    message,
-                    actionLabel = resources.getString(R.string.undo),
-                    duration = SnackbarDuration.Short,
-                )
-                if (result == SnackbarResult.ActionPerformed) {
-                    withContext(Dispatchers.IO) { flagStore.restore(before) }
-                }
+                undo.push(message) { flagStore.restore(before) }
             }
+        },
+        onDelete = { chosen ->
+            deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to it.address }, context)
         },
         onBack = onBack,
         onNewMessage = onNewMessage,
         onShowArchive = onShowArchive,
+        onShowTrash = onShowTrash,
         onSettings = onSettings,
+    )
+}
+
+/** Moves conversations to the trash, clears their notifications, and offers undo. */
+private fun deleteConversations(
+    scope: CoroutineScope,
+    trash: Trash,
+    undo: UndoQueue,
+    resources: Resources,
+    threads: Map<Long, String>,
+    context: Context,
+) {
+    val notifier = MessageNotifier(context)
+    scope.launch {
+        val items = withContext(Dispatchers.IO) { trash.deleteConversations(threads) }
+        if (items.isEmpty()) return@launch
+        threads.keys.forEach { notifier.cancel(it) }
+        undo.push(resources.getQuantityString(R.plurals.deleted_conversations, items.size, items.size)) {
+            trash.restore(items.asReversed())
+        }
+    }
+}
+
+@Composable
+private fun TrashRoute(undo: UndoQueue, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val trash = remember { Trash.get(context) }
+    val flow = remember { trash.items() }
+    val items by flow.collectAsStateWithLifecycle(initialValue = null)
+    TrashScreen(
+        items = items,
+        onRestore = { item ->
+            scope.launch(Dispatchers.IO) { trash.restore(listOf(item.id)) }
+            undo.snackbar.currentSnackbarData?.dismiss()
+            scope.launch { undo.snackbar.showSnackbar(resources.getQuantityString(R.plurals.restored_count, 1, 1)) }
+        },
+        onDeleteForever = { item -> scope.launch(Dispatchers.IO) { trash.deleteForever(listOf(item.id)) } },
+        onEmpty = { scope.launch(Dispatchers.IO) { trash.empty() } },
+        onBack = onBack,
     )
 }

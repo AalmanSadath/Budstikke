@@ -22,13 +22,56 @@ class AppDatabase private constructor(context: Context) :
             )
             """.trimIndent(),
         )
+        createTrash(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createTrash(db)
+    }
+
+    /**
+     * Deleted conversations and messages. One item is one deletion; its messages are copies
+     * of the rows taken out of the system store, enough to write them back as they were.
+     */
+    private fun createTrash(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE trash_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                whole_conversation INTEGER NOT NULL,
+                address TEXT NOT NULL,
+                deleted_at INTEGER NOT NULL,
+                pinned_at INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE trash_messages (
+                item_id INTEGER NOT NULL REFERENCES trash_items(id) ON DELETE CASCADE,
+                address TEXT,
+                body TEXT,
+                date INTEGER NOT NULL,
+                date_sent INTEGER NOT NULL,
+                type INTEGER NOT NULL,
+                read INTEGER NOT NULL,
+                seen INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                sub_id INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX trash_messages_item ON trash_messages(item_id)")
+    }
+
+    override fun onConfigure(db: SQLiteDatabase) {
+        db.setForeignKeyConstraintsEnabled(true)
+    }
 
     companion object {
         private const val NAME = "budstikke.db"
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")
