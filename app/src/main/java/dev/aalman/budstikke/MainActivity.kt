@@ -13,6 +13,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import dev.aalman.budstikke.data.Conversation
+import dev.aalman.budstikke.data.ConversationFlags
+import dev.aalman.budstikke.data.Flags
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -25,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -58,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private var isDefaultSmsApp by mutableStateOf(false)
     private var openThread by mutableStateOf<OpenThread?>(null)
     private var showSettings by mutableStateOf(false)
+    private var showArchive by mutableStateOf(false)
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -79,6 +87,7 @@ class MainActivity : ComponentActivity() {
             state.getString(STATE_ADDRESS)?.let { OpenThread(state.getLong(STATE_THREAD_ID), it) }
         } ?: threadFrom(intent)
         showSettings = savedInstanceState?.getBoolean(STATE_SETTINGS) ?: false
+        showArchive = savedInstanceState?.getBoolean(STATE_ARCHIVE) ?: false
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -97,16 +106,23 @@ class MainActivity : ComponentActivity() {
                         BackHandler { showSettings = false }
                         SettingsScreen(sims = sims, onBack = { showSettings = false })
                     }
-                    else -> {
-                        val flow = remember { conversations.conversations() }
-                        val list by flow.collectAsStateWithLifecycle(initialValue = null)
-                        ConversationListScreen(
-                            conversations = list,
+                    showArchive -> {
+                        BackHandler { showArchive = false }
+                        ConversationListRoute(
+                            conversations,
+                            archive = true,
                             onOpen = { openThread = OpenThread(it.threadId, it.address) },
-                            onNewMessage = { startActivity(Intent(this, ComposeActivity::class.java)) },
-                            onSettings = { showSettings = true },
+                            onBack = { showArchive = false },
                         )
                     }
+                    else -> ConversationListRoute(
+                        conversations,
+                        archive = false,
+                        onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                        onNewMessage = { startActivity(Intent(this, ComposeActivity::class.java)) },
+                        onShowArchive = { showArchive = true },
+                        onSettings = { showSettings = true },
+                    )
                 }
             }
         }
@@ -127,6 +143,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_SETTINGS, showSettings)
+        outState.putBoolean(STATE_ARCHIVE, showArchive)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -166,6 +183,7 @@ class MainActivity : ComponentActivity() {
         private const val STATE_THREAD_ID = "thread_id"
         private const val STATE_ADDRESS = "address"
         private const val STATE_SETTINGS = "settings"
+        private const val STATE_ARCHIVE = "archive"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -195,6 +213,10 @@ private fun ConversationRoute(
     val sim = sims.firstOrNull { it.subscriptionId == chosenSubscription }
         ?: preferredSim(sims, settings.defaultSubscriptionId)
     val contacts = remember { ContactRepository.get(context) }
+    val flagStore = remember { ConversationFlags.get(context) }
+    val flags by produceState(Flags(), thread.threadId) {
+        flagStore.changes().collect { value = withContext(Dispatchers.IO) { flagStore.of(thread.threadId) } }
+    }
     val contact by produceState<Contact?>(null, thread.address) {
         value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
         contacts.changes().collect {
@@ -242,6 +264,68 @@ private fun ConversationRoute(
             }
         },
         onRetry = { message -> scope.launch(Dispatchers.IO) { sender.retry(message.id) } },
+        flags = flags,
+        onPinChange = { pinned ->
+            scope.launch(Dispatchers.IO) { flagStore.setPinned(listOf(thread.threadId), pinned) }
+        },
+        onArchiveChange = { archived ->
+            scope.launch(Dispatchers.IO) { flagStore.setArchived(listOf(thread.threadId), archived) }
+            // An archived conversation leaves the list it was opened from, so go back to it.
+            if (archived) onBack()
+        },
         onBack = onBack,
+    )
+}
+
+/**
+ * The main list or the archive, with pinning and archiving. Archiving or unarchiving from
+ * the list offers undo, which puts pins back too.
+ */
+@Composable
+private fun ConversationListRoute(
+    repository: ConversationRepository,
+    archive: Boolean,
+    onOpen: (Conversation) -> Unit,
+    onBack: (() -> Unit)? = null,
+    onNewMessage: (() -> Unit)? = null,
+    onShowArchive: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val flagStore = remember { ConversationFlags.get(context) }
+    val flow = remember(archive) { repository.conversations(archived = archive) }
+    val list by flow.collectAsStateWithLifecycle(initialValue = null)
+    val snackbar = remember { SnackbarHostState() }
+    val resources = LocalResources.current
+    ConversationListScreen(
+        conversations = list,
+        archive = archive,
+        snackbar = snackbar,
+        onOpen = onOpen,
+        onPin = { ids, pinned -> scope.launch(Dispatchers.IO) { flagStore.setPinned(ids, pinned) } },
+        onArchive = { ids, archived ->
+            scope.launch {
+                val before = withContext(Dispatchers.IO) { flagStore.setArchived(ids, archived) }
+                val message = resources.getQuantityString(
+                    if (archived) R.plurals.archived_count else R.plurals.unarchived_count,
+                    ids.size,
+                    ids.size,
+                )
+                snackbar.currentSnackbarData?.dismiss()
+                val result = snackbar.showSnackbar(
+                    message,
+                    actionLabel = resources.getString(R.string.undo),
+                    duration = SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    withContext(Dispatchers.IO) { flagStore.restore(before) }
+                }
+            }
+        },
+        onBack = onBack,
+        onNewMessage = onNewMessage,
+        onShowArchive = onShowArchive,
+        onSettings = onSettings,
     )
 }

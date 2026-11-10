@@ -50,4 +50,26 @@
     <string name="settings_sim_system">System default</string>
     <string name="settings_sim_hint">Replies from a notification go out on the SIM the message came in on.</string>
     <string name="settings_sim_none">SIM choice needs phone access.</string>
+    <string name="archived">Archived</string>
+    <string name="archived_empty">No archived conversations</string>
+    <string name="pin">Pin</string>
+    <string name="unpin">Unpin</string>
+    <string name="pinned">Pinned</string>
+    <string name="archive">Archive</string>
+    <string name="unarchive">Unarchive</string>
+    <string name="more_options">More options</string>
+    <string name="clear_selection">Clear selection</string>
+    <plurals name="selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <plurals name="archived_count">
+        <item quantity="one">Conversation archived</item>
+        <item quantity="other">%1$d conversations archived</item>
+    </plurals>
+    <plurals name="unarchived_count">
+        <item quantity="one">Conversation unarchived</item>
+        <item quantity="other">%1$d conversations unarchived</item>
+    </plurals>
+    <string name="undo">Undo</string>
 </resources>

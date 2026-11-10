@@ -5,6 +5,7 @@ import android.provider.Telephony
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -18,6 +19,7 @@ data class Conversation(
     val lastFromMe: Boolean,
     val unreadCount: Int,
     val contact: Contact? = null,
+    val flags: Flags = Flags(),
 ) {
     /** The contact's name, or the number or sender name when there is no saved contact. */
     val title: String get() = contact?.name ?: address
@@ -31,14 +33,21 @@ class ConversationRepository(context: Context) {
 
     private val resolver = context.applicationContext.contentResolver
     private val contacts = ContactRepository.get(context)
+    private val flags = ConversationFlags.get(context)
 
-    /** Emits the conversation list now, and again whenever the SMS store or contacts change. */
-    fun conversations(): Flow<List<Conversation>> = merge(resolver.smsChanges(), contacts.changes())
-        .conflate()
-        .map { load() }
-        .flowOn(Dispatchers.IO)
+    /**
+     * Emits the main list, or the archive when [archived] is true, now and again whenever the
+     * SMS store, contacts, pins or the archive change. The main list has pinned
+     * conversations first; within each part the newest is first.
+     */
+    fun conversations(archived: Boolean): Flow<List<Conversation>> =
+        merge(resolver.smsChanges(), contacts.changes(), flags.changes())
+            .conflate()
+            .map { load()?.filter { it.flags.archived == archived }?.sortedByDescending { it.flags.pinned } }
+            .flowOn(Dispatchers.IO)
+            .filterNotNull()
 
-    private fun load(): List<Conversation> {
+    private fun load(): List<Conversation>? {
         val latest = LinkedHashMap<Long, Conversation>()
         val unread = HashMap<Long, Int>()
         val projection = arrayOf(
@@ -49,13 +58,14 @@ class ConversationRepository(context: Context) {
             Telephony.Sms.TYPE,
             Telephony.Sms.READ,
         )
-        resolver.query(
+        val cursor = resolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
             null,
             null,
             "${Telephony.Sms.DATE} DESC",
-        )?.use { c ->
+        ) ?: return null
+        cursor.use { c ->
             val thread = c.getColumnIndexOrThrow(Telephony.Sms.THREAD_ID)
             val address = c.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
             val body = c.getColumnIndexOrThrow(Telephony.Sms.BODY)
@@ -80,9 +90,15 @@ class ConversationRepository(context: Context) {
                 }
             }
         }
-        // Rows come newest first, so insertion order is already the list order.
+        flags.forgetAllBut(latest.keys)
+        val allFlags = flags.all()
+        // Rows come newest first, so insertion order is already date order.
         return latest.values.map {
-            it.copy(unreadCount = unread[it.threadId] ?: 0, contact = contacts.lookup(it.address))
+            it.copy(
+                unreadCount = unread[it.threadId] ?: 0,
+                contact = contacts.lookup(it.address),
+                flags = allFlags[it.threadId] ?: Flags(),
+            )
         }
     }
 }

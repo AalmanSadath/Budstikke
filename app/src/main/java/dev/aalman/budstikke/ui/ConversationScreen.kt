@@ -19,6 +19,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
+import dev.aalman.budstikke.data.Flags
+import androidx.compose.ui.res.painterResource
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +58,9 @@ fun ConversationScreen(
     onSimChange: (Sim) -> Unit,
     onSend: () -> Unit,
     onRetry: (Message) -> Unit,
+    flags: Flags,
+    onPinChange: (Boolean) -> Unit,
+    onArchiveChange: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     Column(
@@ -54,7 +69,9 @@ fun ConversationScreen(
             .background(MaterialTheme.colorScheme.background)
             .imePadding(),
     ) {
-        TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) })
+        TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
+            ConversationMenu(flags, onPinChange, onArchiveChange)
+        }
         val listState = rememberLazyListState()
         val newest = messages.lastOrNull()
         // The list runs bottom up and keeps its place on the message it was showing, so a
@@ -155,5 +172,46 @@ private fun Bubble(message: Message, simLabel: String?, onRetry: (Message) -> Un
             fontSize = 11.sp,
             color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** Pin and archive for the open conversation. Pinning is offered only outside the archive. */
+@Composable
+private fun ConversationMenu(
+    flags: Flags,
+    onPinChange: (Boolean) -> Unit,
+    onArchiveChange: (Boolean) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(40.dp)) {
+            Icon(
+                painterResource(R.drawable.ic_more),
+                contentDescription = stringResource(R.string.more_options),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (!flags.archived) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (flags.pinned) R.string.unpin else R.string.pin)) },
+                    leadingIcon = { Icon(painterResource(R.drawable.ic_pin), null) },
+                    onClick = {
+                        open = false
+                        onPinChange(!flags.pinned)
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text(stringResource(if (flags.archived) R.string.unarchive else R.string.archive)) },
+                leadingIcon = {
+                    Icon(painterResource(if (flags.archived) R.drawable.ic_unarchive else R.drawable.ic_archive), null)
+                },
+                onClick = {
+                    open = false
+                    onArchiveChange(!flags.archived)
+                },
+            )
+        }
     }
 }
