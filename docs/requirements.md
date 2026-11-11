@@ -49,12 +49,12 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R4. Conversation list
 
-- [ ] Every SMS conversation already on the phone is listed, newest first, with name or number,
+- [x] Every SMS conversation already on the phone is listed, newest first, with name or number,
       the last message's text (prefixed "You:" when sent), and a relative time ("7 min",
       "Yesterday", "Oct 31").
-- [ ] Unread conversations are visibly distinct (bold name and text, unread count).
-- [ ] Search finds conversations by contact name, number, and message text.
-- [ ] A button starts a new conversation: pick a contact, or type a number and choose
+- [x] Unread conversations are visibly distinct (bold name and text, unread count).
+- [x] Search finds conversations by contact name, number, and message text.
+- [x] A button starts a new conversation: pick a contact, or type a number and choose
       "Send to <number>".
 
 ## R5. Conversation avatars and contact photos

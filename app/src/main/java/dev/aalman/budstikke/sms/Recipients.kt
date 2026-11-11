@@ -20,3 +20,24 @@ internal fun bodyOf(schemeSpecificPart: String): String? =
         .firstOrNull { it.startsWith("body=") }
         ?.removePrefix("body=")
         ?.let { Uri.decode(it) }
+
+/** The recipient being typed into a "To" field: whatever follows the last separator. */
+internal fun typedRecipient(field: String): String =
+    field.substring(maxOf(field.lastIndexOf(','), field.lastIndexOf(';')) + 1).trim()
+
+/**
+ * The "To" field with the recipient being typed replaced by [number], and a separator after
+ * it so the next one can be typed straight away.
+ */
+internal fun withRecipient(field: String, number: String): String {
+    val cut = maxOf(field.lastIndexOf(','), field.lastIndexOf(';'))
+    val before = if (cut >= 0) field.substring(0, cut + 1).trimEnd() + " " else ""
+    return "$before$number, "
+}
+
+/**
+ * Whether [text] can be sent to as it is: a phone number, possibly written with spaces,
+ * dashes, dots or brackets. A name typed and not picked from the suggestions is not.
+ */
+internal fun looksLikeNumber(text: String): Boolean =
+    text.any(Char::isDigit) && text.all { it.isDigit() || it in "+ -()." }

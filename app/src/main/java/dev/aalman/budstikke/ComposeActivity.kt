@@ -9,6 +9,31 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import dev.aalman.budstikke.data.Contact
+import dev.aalman.budstikke.data.ContactMatch
+import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.sms.looksLikeNumber
+import dev.aalman.budstikke.sms.typedRecipient
+import dev.aalman.budstikke.sms.withRecipient
+import dev.aalman.budstikke.ui.Avatar
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -70,10 +95,27 @@ class ComposeActivity : ComponentActivity() {
             ?: bodyOf(ssp)
             ?: ""
         val sims = activeSims(this)
+        val contacts = ContactRepository.get(this)
 
         setContent {
             BudstikkeTheme {
-                var to by rememberSaveable { mutableStateOf(initialTo) }
+                // A TextFieldValue so that picking a suggestion can put the cursor after it.
+                var to by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+                    mutableStateOf(TextFieldValue(initialTo, TextRange(initialTo.length)))
+                }
+                var dialpad by rememberSaveable { mutableStateOf(false) }
+                var notNumber by remember { mutableStateOf(false) }
+                val typed = typedRecipient(to.text)
+                var suggestions by remember { mutableStateOf(emptyList<ContactMatch>()) }
+                LaunchedEffect(typed) {
+                    delay(SUGGEST_DELAY_MILLIS)
+                    suggestions = withContext(Dispatchers.IO) { contacts.search(typed) }
+                }
+                val pick = { number: String ->
+                    val text = withRecipient(to.text, number)
+                    to = TextFieldValue(text, TextRange(text.length))
+                    notNumber = false
+                }
                 var body by rememberSaveable { mutableStateOf(initialBody) }
                 var chosen by rememberSaveable { mutableStateOf<Int?>(null) }
                 val settings by SettingsRepository.get(this).settings.collectAsState()
@@ -89,15 +131,55 @@ class ComposeActivity : ComponentActivity() {
                     TopBar(stringResource(R.string.new_message), onBack = ::finish)
                     OutlinedTextField(
                         value = to,
-                        onValueChange = { to = it },
+                        onValueChange = {
+                            to = it
+                            notNumber = false
+                        },
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
                         label = { Text(stringResource(R.string.to_label)) },
                         placeholder = { Text(stringResource(R.string.to_hint)) },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
+                        isError = notNumber,
+                        supportingText = if (notNumber) ({ Text(stringResource(R.string.to_not_number)) }) else null,
+                        // Names need letters, so the keyboard is the default; the number pad
+                        // is a tap away for typing a number.
+                        trailingIcon = {
+                            IconButton(onClick = { dialpad = !dialpad }) {
+                                Icon(
+                                    painterResource(if (dialpad) R.drawable.ic_keyboard else R.drawable.ic_dialpad),
+                                    stringResource(if (dialpad) R.string.use_keyboard else R.string.use_dialpad),
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (dialpad) KeyboardType.Phone else KeyboardType.Text,
+                            imeAction = ImeAction.Next,
+                        ),
                     )
-                    // The empty space between the fields; tapping it takes the cursor away.
-                    Box(Modifier.weight(1f).fillMaxWidth().clearFocusOnTap(LocalFocusManager.current))
+                    // Below the field: who the typed text could be. Tapping elsewhere in
+                    // the space takes the cursor away.
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth().clearFocusOnTap(LocalFocusManager.current)) {
+                        if (looksLikeNumber(typed) && suggestions.none { it.number == typed }) {
+                            item(key = "number") {
+                                SuggestionRow(
+                                    title = stringResource(R.string.send_to_number, typed),
+                                    detail = null,
+                                    address = typed,
+                                    contact = null,
+                                    onClick = { pick(typed) },
+                                )
+                            }
+                        }
+                        items(suggestions, key = { "${it.name}|${it.number}" }) { match ->
+                            SuggestionRow(
+                                title = match.name,
+                                detail = "${match.label} · ${match.number}",
+                                address = match.number,
+                                contact = match.contact,
+                                onClick = { pick(match.number) },
+                            )
+                        }
+                    }
                     ComposeBar(
                         text = body,
                         onTextChange = { body = it },
@@ -105,9 +187,12 @@ class ComposeActivity : ComponentActivity() {
                         sim = sim,
                         onSimChange = { chosen = it.subscriptionId },
                         onSend = {
-                            val recipients = parseRecipients(to)
+                            val recipients = parseRecipients(to.text)
                             val text = body.trim()
-                            if (recipients.isNotEmpty() && text.isNotEmpty()) {
+                            // A name typed but not picked has no number to send to.
+                            if (recipients.any { !looksLikeNumber(it) }) {
+                                notNumber = true
+                            } else if (recipients.isNotEmpty() && text.isNotEmpty()) {
                                 send(recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
                             }
                         },
@@ -116,6 +201,11 @@ class ComposeActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private companion object {
+        /** How long typing in "To" must pause before contacts are searched. */
+        const val SUGGEST_DELAY_MILLIS = 100L
     }
 
     private fun send(recipients: List<String>, text: String, subscriptionId: Int) {
@@ -138,6 +228,27 @@ class ComposeActivity : ComponentActivity() {
                 },
             )
             finish()
+        }
+    }
+}
+
+/** A contact, or a typed number, to send to. */
+@Composable
+private fun SuggestionRow(title: String, detail: String?, address: String, contact: Contact?, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(address, contact, size = 40.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (detail != null) {
+                Text(detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

@@ -72,6 +72,7 @@ fun ConversationListScreen(
     onShowArchive: (() -> Unit)? = null,
     onShowTrash: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
 ) {
     var selected by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf(emptySet<Long>()) }
     // Rows can leave the list while selected (archived elsewhere, or deleted by another app).
@@ -125,6 +126,8 @@ fun ConversationListScreen(
             }
         } else {
             TopBar(stringResource(if (archive) R.string.archived else R.string.app_name), onBack = onBack) {
+                // Leftmost, so the buttons selecting puts in their places line up as before.
+                onSearch?.let { BarAction(R.drawable.ic_search, R.string.search, it) }
                 onShowArchive?.let { BarAction(R.drawable.ic_archive, R.string.archived, it) }
                 onShowTrash?.let { BarAction(R.drawable.ic_delete, R.string.trash, it) }
                 onSettings?.let { BarAction(R.drawable.ic_settings, R.string.settings, it) }
@@ -188,14 +191,19 @@ private val SelectionSaver = Saver<Set<Long>, LongArray>(
     restore = { it.toSet() },
 )
 
+/**
+ * One conversation's card. With a search [query], where it occurs in the name and the
+ * text is marked.
+ */
 @Composable
-private fun ConversationRow(
+internal fun ConversationRow(
     conversation: Conversation,
     isSelected: Boolean,
     showPin: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    query: String? = null,
 ) {
     val pinned = showPin && conversation.flags.pinned
     val pinnedLabel = if (pinned) stringResource(R.string.pinned) else ""
@@ -214,6 +222,7 @@ private fun ConversationRow(
         else -> conversation.snippet
     }
     val primary = MaterialTheme.colorScheme.primary
+    val mark = SpanStyle(color = primary, fontWeight = FontWeight.Bold)
     val shownSnippet = if (draft != null) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = primary, fontWeight = FontWeight.SemiBold)) { append(draftLabel) }
@@ -221,7 +230,7 @@ private fun ConversationRow(
             append(draft)
         }
     } else {
-        AnnotatedString(snippet)
+        markMatches(snippet, query, mark)
     }
     val time = listTime(LocalContext.current, conversation.dateMillis)
     Row(
@@ -244,7 +253,7 @@ private fun ConversationRow(
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    conversation.title,
+                    markMatches(conversation.title, query, mark),
                     Modifier.weight(1f),
                     fontSize = 16.sp,
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,

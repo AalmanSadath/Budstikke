@@ -25,6 +25,15 @@ import java.util.concurrent.ConcurrentHashMap
  */
 data class Contact(val name: String, val photoUri: Uri?, val version: Int = 0)
 
+/** One saved number of a contact, as found by [ContactRepository.search]. */
+data class ContactMatch(
+    val name: String,
+    val number: String,
+    /** The number's type as the contacts app names it: "Mobile", "Work", a custom label. */
+    val label: String,
+    val contact: Contact,
+)
+
 /**
  * Looks up saved contacts by phone number, through Android's own matching so that
  * "+61 412 345 678" and "0412345678" find the same person. Results are cached until the
@@ -88,6 +97,45 @@ class ContactRepository private constructor(context: Context) {
         return contact
     }
 
+    /**
+     * Saved phone numbers whose contact name or number matches [text], as Android's own
+     * contact search finds them, at most [limit]. Empty without access to contacts.
+     */
+    fun search(text: String, limit: Int = SEARCH_LIMIT): List<ContactMatch> {
+        if (text.isBlank() || !canRead) return emptyList()
+        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI, Uri.encode(text.trim()))
+        return runCatching {
+            resolver.query(
+                uri,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.TYPE,
+                    ContactsContract.CommonDataKinds.Phone.LABEL,
+                    ContactsContract.CommonDataKinds.Phone.PHOTO_THUMBNAIL_URI,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                val seen = HashSet<Pair<Long, String>>()
+                buildList {
+                    while (c.moveToNext() && size < limit) {
+                        val number = c.getString(2)?.takeIf { it.isNotBlank() } ?: continue
+                        // A number saved twice on one contact, often once per account.
+                        if (!seen.add(c.getLong(0) to number.filter { it.isDigit() || it == '+' })) continue
+                        val name = c.getString(1)?.takeIf { it.isNotBlank() } ?: number
+                        val label = ContactsContract.CommonDataKinds.Phone.getTypeLabel(
+                            context.resources, c.getInt(3), c.getString(4),
+                        ).toString()
+                        add(ContactMatch(name, number, label, Contact(name, c.getString(5)?.let(Uri::parse), version.value)))
+                    }
+                }
+            }
+        }.getOrNull().orEmpty()
+    }
+
     /** The contact's photo thumbnail, or null when there is none or it cannot be read. */
     fun photo(uri: Uri): Bitmap? {
         photos.get(uri)?.let { return it }
@@ -133,6 +181,7 @@ class ContactRepository private constructor(context: Context) {
 
     companion object {
         private const val PHOTO_CACHE_SIZE = 64
+        private const val SEARCH_LIMIT = 50
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")
