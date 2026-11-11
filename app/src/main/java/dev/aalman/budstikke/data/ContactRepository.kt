@@ -40,17 +40,34 @@ class ContactRepository private constructor(context: Context) {
     private val photos = LruCache<Uri, Bitmap>(PHOTO_CACHE_SIZE)
     private val version = MutableStateFlow(0)
 
+    private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = invalidate()
+    }
+
+    @Volatile
+    private var observing = false
+
     init {
-        // Watched for the life of the process rather than only while a screen collects:
-        // contacts are usually edited while this app is in the background, and the cache
-        // has to be dropped then too. Registering needs no permission.
-        resolver.registerContentObserver(
-            ContactsContract.AUTHORITY_URI,
-            true,
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) = invalidate()
-            },
-        )
+        watch()
+    }
+
+    /**
+     * Watches the contacts store for the life of the process rather than only while a
+     * screen collects: contacts are usually edited while this app is in the background, and
+     * the cache has to be dropped then too.
+     *
+     * Registering needs access to contacts, and throws without it, so this waits until
+     * access is granted; [invalidate], which runs on the grant, tries again. Taking access
+     * away later stops the process, so a registration never outlives it.
+     */
+    private fun watch() {
+        if (observing || !canRead) return
+        synchronized(this) {
+            if (observing) return
+            observing = runCatching {
+                resolver.registerContentObserver(ContactsContract.AUTHORITY_URI, true, observer)
+            }.isSuccess
+        }
     }
 
     private sealed interface Lookup {
@@ -89,6 +106,7 @@ class ContactRepository private constructor(context: Context) {
 
     /** Forgets cached lookups and photos, and tells every screen to look again. */
     fun invalidate() {
+        watch()
         cache.clear()
         photos.evictAll()
         version.update { it + 1 }
