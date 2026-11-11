@@ -207,6 +207,7 @@ internal fun ConversationRow(
 ) {
     val pinned = showPin && conversation.flags.pinned
     val pinnedLabel = if (pinned) stringResource(R.string.pinned) else ""
+    val workLabel = if (conversation.contact?.work == true) stringResource(R.string.work_contact) else ""
     val unread = conversation.unreadCount > 0
     val unreadLabel = if (unread) {
         pluralStringResource(R.plurals.unread_count, conversation.unreadCount, conversation.unreadCount)
@@ -242,7 +243,7 @@ internal fun ConversationRow(
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .semantics(mergeDescendants = true) {
                 selected = isSelected
-                contentDescription = listOf(conversation.title, pinnedLabel, unreadLabel, snippet, time)
+                contentDescription = listOf(conversation.title, workLabel, pinnedLabel, unreadLabel, snippet, time)
                     .filter { it.isNotEmpty() }
                     .joinToString(", ")
             },

@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -235,11 +237,15 @@ class ComposeActivity : ComponentActivity() {
 /** A contact, or a typed number, to send to. */
 @Composable
 private fun SuggestionRow(title: String, detail: String?, address: String, contact: Contact?, onClick: () -> Unit) {
+    val work = if (contact?.work == true) stringResource(R.string.work_contact) else null
     Row(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = listOfNotNull(title, work, detail).joinToString(", ")
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(address, contact, size = 40.dp)

@@ -23,7 +23,13 @@ import java.util.concurrent.ConcurrentHashMap
  * store: a new photo keeps the same [photoUri], so the version is what tells a screen to
  * load it again.
  */
-data class Contact(val name: String, val photoUri: Uri?, val version: Int = 0)
+data class Contact(
+    val name: String,
+    val photoUri: Uri?,
+    val version: Int = 0,
+    /** Saved in the work profile rather than the personal one. */
+    val work: Boolean = false,
+)
 
 /** One saved number of a contact, as found by [ContactRepository.search]. */
 data class ContactMatch(
@@ -103,7 +109,19 @@ class ContactRepository private constructor(context: Context) {
      */
     fun search(text: String, limit: Int = SEARCH_LIMIT): List<ContactMatch> {
         if (text.isBlank() || !canRead) return emptyList()
-        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI, Uri.encode(text.trim()))
+        val personal = searchDirectory(text.trim(), ContactsContract.Directory.DEFAULT, limit)
+        // The work profile's contacts, when there is one and its admin allows looking them
+        // up from the personal side. Without one this finds nothing.
+        val work = searchDirectory(text.trim(), ContactsContract.Directory.ENTERPRISE_DEFAULT, limit - personal.size)
+        return personal + work
+    }
+
+    private fun searchDirectory(text: String, directory: Long, limit: Int): List<ContactMatch> {
+        if (limit <= 0) return emptyList()
+        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.ENTERPRISE_CONTENT_FILTER_URI, Uri.encode(text))
+            .buildUpon()
+            .appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY, directory.toString())
+            .build()
         return runCatching {
             resolver.query(
                 uri,
@@ -123,13 +141,16 @@ class ContactRepository private constructor(context: Context) {
                 buildList {
                     while (c.moveToNext() && size < limit) {
                         val number = c.getString(2)?.takeIf { it.isNotBlank() } ?: continue
+                        val id = c.getLong(0)
                         // A number saved twice on one contact, often once per account.
-                        if (!seen.add(c.getLong(0) to number.filter { it.isDigit() || it == '+' })) continue
+                        if (!seen.add(id to number.filter { it.isDigit() || it == '+' })) continue
                         val name = c.getString(1)?.takeIf { it.isNotBlank() } ?: number
                         val label = ContactsContract.CommonDataKinds.Phone.getTypeLabel(
                             context.resources, c.getInt(3), c.getString(4),
                         ).toString()
-                        add(ContactMatch(name, number, label, Contact(name, c.getString(5)?.let(Uri::parse), version.value)))
+                        val work = directory == ContactsContract.Directory.ENTERPRISE_DEFAULT ||
+                            ContactsContract.Contacts.isEnterpriseContactId(id)
+                        add(ContactMatch(name, number, label, Contact(name, c.getString(5)?.let(Uri::parse), version.value, work)))
                     }
                 }
             }
@@ -163,18 +184,29 @@ class ContactRepository private constructor(context: Context) {
     private fun query(address: String): Contact? {
         // A sender name such as "BANK" is not a number and cannot match a contact.
         if (address.none(Char::isDigit)) return null
-        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address))
+        // The enterprise lookup finds personal contacts first, then work ones when the phone
+        // has a work profile that allows it; without one it is the same as the plain lookup.
+        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI, Uri.encode(address))
         return runCatching {
             resolver.query(
                 uri,
-                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME, ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI),
+                arrayOf(
+                    ContactsContract.PhoneLookup.DISPLAY_NAME,
+                    ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI,
+                    ContactsContract.PhoneLookup._ID,
+                ),
                 null,
                 null,
                 null,
             )?.use { c ->
                 if (!c.moveToFirst()) return@use null
                 val name = c.getString(0)?.takeIf { it.isNotBlank() } ?: return@use null
-                Contact(name, c.getString(1)?.let(Uri::parse), version.value)
+                Contact(
+                    name,
+                    c.getString(1)?.let(Uri::parse),
+                    version.value,
+                    work = ContactsContract.Contacts.isEnterpriseContactId(c.getLong(2)),
+                )
             }
         }.getOrNull()
     }

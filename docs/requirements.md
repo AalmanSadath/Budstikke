@@ -171,10 +171,10 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R18. Work profile contacts
 
-- [ ] On a phone with a work profile, searching in "New conversation" and in the list finds
+- [x] On a phone with a work profile, searching in "New conversation" and in the list finds
       both personal and work contacts.
-- [ ] Work contacts carry a briefcase badge on their avatar.
-- [ ] Without a work profile, nothing changes and no badge appears.
+- [x] Work contacts carry a briefcase badge on their avatar.
+- [x] Without a work profile, nothing changes and no badge appears.
 
 ## R19. Reactions
 
