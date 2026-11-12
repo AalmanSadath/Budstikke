@@ -2,6 +2,7 @@ package dev.aalman.budstikke
 
 import android.app.Application
 import dev.aalman.budstikke.data.Trash
+import dev.aalman.budstikke.lock.LockSession
 import dev.aalman.budstikke.sms.OutgoingQueue
 import dev.aalman.budstikke.trash.schedulePurge
 import kotlin.concurrent.thread
@@ -10,6 +11,7 @@ class BudstikkeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        LockSession.install(this)
         // Empty expired trash whenever the app's process starts, and make sure the daily
         // alarm that does it otherwise is set.
         schedulePurge(this, onlyIfMissing = true)

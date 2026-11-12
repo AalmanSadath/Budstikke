@@ -21,6 +21,8 @@ data class TrashItem(
     val messageCount: Int,
     val lastBody: String,
     val contact: Contact? = null,
+    /** Holds a locked conversation or message: its text stays hidden until unlocked. */
+    val locked: Boolean = false,
 ) {
     val title: String get() = contact?.name ?: address
     val expiresAtMillis: Long get() = deletedAtMillis + KEEP_MILLIS
@@ -40,6 +42,7 @@ class Trash private constructor(context: Context) {
     private val db = AppDatabase.get(context)
     private val flags = ConversationFlags.get(context)
     private val contacts = ContactRepository.get(context)
+    private val locks = Locks.get(context)
     private val version = MutableStateFlow(0)
 
     /** The trash, newest deletion first, reloaded after every change. */
@@ -50,9 +53,13 @@ class Trash private constructor(context: Context) {
     /** Moves whole conversations to the trash, one item each. Returns the new items' ids. */
     fun deleteConversations(threads: Map<Long, String>): List<Long> {
         val before = flags.all()
+        val lockState = locks.state()
         val ids = threads.mapNotNull { (threadId, address) ->
             val f = before[threadId] ?: Flags()
-            move(address, "${Telephony.Sms.THREAD_ID} = ?", arrayOf(threadId.toString()), true, f)
+            move(
+                address, "${Telephony.Sms.THREAD_ID} = ?", arrayOf(threadId.toString()), true, f,
+                threadLocked = threadId in lockState.threads, lockedMessages = lockState.messages,
+            )?.also { locks.setThreadLocked(threadId, false) }
         }
         version.update { it + 1 }
         return ids
@@ -67,6 +74,8 @@ class Trash private constructor(context: Context) {
             messageIds.map { it.toString() }.toTypedArray(),
             false,
             Flags(),
+            threadLocked = false,
+            lockedMessages = locks.state().messages,
         )
         version.update { it + 1 }
         return id
@@ -80,16 +89,18 @@ class Trash private constructor(context: Context) {
         val sql = db.writableDatabase
         for (itemId in itemIds) {
             val item = sql.query(
-                "trash_items", arrayOf("whole_conversation", "pinned_at", "archived"),
+                "trash_items", arrayOf("whole_conversation", "pinned_at", "archived", "thread_locked"),
                 "id = ?", arrayOf(itemId.toString()), null, null, null,
             ).use { c ->
                 if (!c.moveToFirst()) null
-                else Triple(c.getInt(0) != 0, if (c.isNull(1)) null else c.getLong(1), c.getInt(2) != 0)
+                else Triple(c.getInt(0) != 0, if (c.isNull(1)) null else c.getLong(1), c.getInt(2) != 0) to (c.getInt(3) != 0)
             } ?: continue
             var threadId: Long? = null
+            // Restored rows get new ids, so their locks are set again on those.
+            val relock = ArrayList<Long>()
             sql.query(
                 "trash_messages",
-                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id"),
+                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id", "locked"),
                 "item_id = ?", arrayOf(itemId.toString()), null, null, "date ASC",
             ).use { c ->
                 while (c.moveToNext()) {
@@ -105,17 +116,21 @@ class Trash private constructor(context: Context) {
                         put(Telephony.Sms.SUBSCRIPTION_ID, c.getInt(8))
                     }
                     val uri = resolver.insert(Telephony.Sms.CONTENT_URI, values) ?: continue
+                    if (c.getInt(9) != 0) uri.lastPathSegment?.toLongOrNull()?.let(relock::add)
                     if (threadId == null) {
                         threadId = resolver.query(uri, arrayOf(Telephony.Sms.THREAD_ID), null, null, null)
                             ?.use { t -> if (t.moveToFirst()) t.getLong(0) else null }
                     }
                 }
             }
-            val (whole, pinnedAt, archived) = item
+            val (state, threadLocked) = item
+            val (whole, pinnedAt, archived) = state
             val restoredThread = threadId
             if (whole && restoredThread != null && (pinnedAt != null || archived)) {
                 flags.restore(mapOf(restoredThread to Flags(pinnedAt, archived)))
             }
+            if (threadLocked && restoredThread != null) locks.setThreadLocked(restoredThread, true)
+            locks.setMessagesLocked(relock, true)
             sql.delete("trash_items", "id = ?", arrayOf(itemId.toString()))
         }
         version.update { it + 1 }
@@ -150,6 +165,8 @@ class Trash private constructor(context: Context) {
         args: Array<String>,
         wholeConversation: Boolean,
         flags: Flags,
+        threadLocked: Boolean,
+        lockedMessages: Set<Long>,
     ): Long? {
         val sql = db.writableDatabase
         val copied = ArrayList<Long>()
@@ -162,6 +179,7 @@ class Trash private constructor(context: Context) {
                 put("deleted_at", System.currentTimeMillis())
                 put("pinned_at", flags.pinnedAt)
                 put("archived", if (flags.archived) 1 else 0)
+                put("thread_locked", if (threadLocked) 1 else 0)
             })
             resolver.query(
                 Telephony.Sms.CONTENT_URI,
@@ -173,7 +191,8 @@ class Trash private constructor(context: Context) {
                 selection, args, null,
             )?.use { c ->
                 while (c.moveToNext()) {
-                    copied += c.getLong(0)
+                    val id = c.getLong(0)
+                    copied += id
                     sql.insertOrThrow("trash_messages", null, ContentValues().apply {
                         put("item_id", itemId)
                         put("address", c.getString(1))
@@ -185,6 +204,7 @@ class Trash private constructor(context: Context) {
                         put("seen", c.getInt(7))
                         put("status", c.getInt(8))
                         put("sub_id", c.getInt(9))
+                        put("locked", if (id in lockedMessages) 1 else 0)
                     })
                 }
             }
@@ -193,7 +213,9 @@ class Trash private constructor(context: Context) {
         } finally {
             sql.endTransaction()
         }
-        // The copies are committed before anything leaves the system store.
+        // The copies, with their locks, are committed before anything leaves the system store;
+        // the locks on the old ids go with them.
+        locks.setMessagesLocked(copied.filter { it in lockedMessages }, false)
         copied.chunked(500).forEach { chunk ->
             resolver.delete(
                 Telephony.Sms.CONTENT_URI,
@@ -207,7 +229,8 @@ class Trash private constructor(context: Context) {
     private fun load(): List<TrashItem> = db.readableDatabase.rawQuery(
         """
         SELECT i.id, i.whole_conversation, i.address, i.deleted_at, COUNT(m.item_id),
-               (SELECT body FROM trash_messages WHERE item_id = i.id ORDER BY date DESC LIMIT 1)
+               (SELECT body FROM trash_messages WHERE item_id = i.id ORDER BY date DESC LIMIT 1),
+               i.thread_locked OR MAX(m.locked)
         FROM trash_items i LEFT JOIN trash_messages m ON m.item_id = i.id
         GROUP BY i.id ORDER BY i.deleted_at DESC, i.id DESC
         """.trimIndent(),
@@ -225,6 +248,7 @@ class Trash private constructor(context: Context) {
                         messageCount = c.getInt(4),
                         lastBody = c.getString(5).orEmpty(),
                         contact = contacts.lookup(address),
+                        locked = c.getInt(6) != 0,
                     ),
                 )
             }

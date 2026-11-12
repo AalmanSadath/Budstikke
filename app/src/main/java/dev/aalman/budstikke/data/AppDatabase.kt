@@ -26,6 +26,7 @@ class AppDatabase private constructor(context: Context) :
         createBlocks(db)
         createDrafts(db)
         createOutgoing(db)
+        createLocks(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -33,6 +34,25 @@ class AppDatabase private constructor(context: Context) :
         if (oldVersion < 3) createBlocks(db)
         if (oldVersion < 4) createDrafts(db)
         if (oldVersion < 5) createOutgoing(db)
+        if (oldVersion < 6) {
+            createLocks(db)
+            // A trash made before version 2 above already has these columns.
+            if (oldVersion >= 2) addTrashLocks(db)
+        }
+    }
+
+    /**
+     * Conversations and messages locked behind the screen lock: [LOCK_THREAD] rows hold a
+     * thread id, [LOCK_MESSAGE] rows an SMS id from the system store.
+     */
+    private fun createLocks(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE locks (kind INTEGER NOT NULL, id INTEGER NOT NULL, PRIMARY KEY (kind, id))")
+    }
+
+    /** Keeps a deleted conversation's or message's lock with it in the trash. */
+    private fun addTrashLocks(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE trash_items ADD COLUMN thread_locked INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE trash_messages ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
     }
 
     /**
@@ -80,7 +100,8 @@ class AppDatabase private constructor(context: Context) :
                 address TEXT NOT NULL,
                 deleted_at INTEGER NOT NULL,
                 pinned_at INTEGER,
-                archived INTEGER NOT NULL DEFAULT 0
+                archived INTEGER NOT NULL DEFAULT 0,
+                thread_locked INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent(),
         )
@@ -96,7 +117,8 @@ class AppDatabase private constructor(context: Context) :
                 read INTEGER NOT NULL,
                 seen INTEGER NOT NULL,
                 status INTEGER NOT NULL,
-                sub_id INTEGER NOT NULL
+                sub_id INTEGER NOT NULL,
+                locked INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent(),
         )
@@ -109,7 +131,9 @@ class AppDatabase private constructor(context: Context) :
 
     companion object {
         private const val NAME = "budstikke.db"
-        private const val VERSION = 5
+        const val LOCK_THREAD = 0
+        const val LOCK_MESSAGE = 1
+        private const val VERSION = 6
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

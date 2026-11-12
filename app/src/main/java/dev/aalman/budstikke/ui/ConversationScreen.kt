@@ -1,5 +1,10 @@
 package dev.aalman.budstikke.ui
 
+import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import dev.aalman.budstikke.data.LockState
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.text.LinkAnnotation
@@ -99,6 +104,12 @@ fun ConversationScreen(
     onBack: () -> Unit,
     onShowDetails: () -> Unit = {},
     onCopyCode: (String) -> Unit = {},
+    locks: LockState = LockState(),
+    threadId: Long = -1,
+    unlocked: Boolean = true,
+    onUnlock: (then: () -> Unit) -> Unit = { it() },
+    onLockMessages: (Set<Long>, Boolean) -> Unit = { _, _ -> },
+    onLockConversation: (Boolean) -> Unit = {},
     focusMessageId: Long? = null,
     highlight: String? = null,
 ) {
@@ -129,9 +140,22 @@ fun ConversationScreen(
                     }
                 },
             ) {
-                BarAction(R.drawable.ic_delete, R.string.delete) {
-                    onDeleteMessages(selected)
+                // Left of Delete, so Delete keeps the place it has always had.
+                BarAction(R.drawable.ic_select_all, R.string.select_all) {
+                    // Locked messages are left out, so they are never deleted along with the rest.
+                    selected = messages.filterNot { locks.isLocked(threadId, it.id) }.mapTo(HashSet()) { it.id }
+                }
+                val allLocked = selected.all { it in locks.messages }
+                BarAction(if (allLocked) R.drawable.ic_lock_open else R.drawable.ic_lock, if (allLocked) R.string.unlock else R.string.lock) {
+                    val ids = selected
                     selected = emptySet()
+                    // Taking a lock off needs the screen lock; putting one on does not.
+                    if (allLocked) onUnlock { onLockMessages(ids, false) } else onLockMessages(ids, true)
+                }
+                BarAction(R.drawable.ic_delete, R.string.delete) {
+                    val ids = selected
+                    selected = emptySet()
+                    if (ids.any { it in locks.messages }) onUnlock { onDeleteMessages(ids) } else onDeleteMessages(ids)
                 }
             }
         } else {
@@ -141,7 +165,10 @@ fun ConversationScreen(
                 leading = { Avatar(address, contact, size = 32.dp) },
                 onTitleClick = onShowDetails,
             ) {
-                ConversationMenu(flags, blocked, onShowDetails, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
+                ConversationMenu(
+                    flags, blocked, threadId in locks.threads, onShowDetails, onPinChange, onArchiveChange,
+                    onDeleteConversation, onBlockChange, onLockConversation,
+                )
             }
         }
         val listState = rememberLazyListState()
@@ -192,6 +219,12 @@ fun ConversationScreen(
             if (newestPending != null && !anchored) listState.animateScrollToItem(0)
         }
         val focusManager = LocalFocusManager.current
+        // A locked conversation shows nothing of itself until the screen lock is confirmed,
+        // not even a draft in the message field.
+        if (threadId in locks.threads && !unlocked) {
+            LockedPane(onUnlock = { onUnlock {} }, modifier = Modifier.weight(1f))
+            return@Column
+        }
         LazyColumn(
             Modifier
                 .weight(1f)
@@ -214,11 +247,14 @@ fun ConversationScreen(
                     isSelected = message.id in selected,
                     flash = message.id == flashId,
                     highlight = highlight,
+                    locked = message.id in locks.messages,
+                    hidden = message.id in locks.messages && !unlocked,
                     // While selecting, a tap on the code selects like a tap anywhere else.
                     onCopyCode = if (selecting) null else onCopyCode,
                     onClick = {
                         when {
                             selecting -> toggle()
+                            message.id in locks.messages && !unlocked -> onUnlock {}
                             message.state == MessageState.Failed -> onRetry(message)
                         }
                     },
@@ -360,6 +396,8 @@ private fun Bubble(
     isSelected: Boolean,
     flash: Boolean,
     highlight: String?,
+    locked: Boolean,
+    hidden: Boolean,
     onCopyCode: ((String) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -375,10 +413,12 @@ private fun Bubble(
         MessageState.Delivered -> stringResource(R.string.state_delivered)
         MessageState.Failed -> stringResource(R.string.state_failed)
     }
+    // A locked message keeps its text out of the bubble and out of TalkBack until unlocked.
+    val body = if (hidden) stringResource(R.string.locked_message) else message.body
     val description = if (outgoing) {
-        stringResource(R.string.message_from_you, time, message.body, state.orEmpty())
+        stringResource(R.string.message_from_you, time, body, state.orEmpty())
     } else {
-        stringResource(R.string.message_from_them, time, message.body)
+        stringResource(R.string.message_from_them, time, body)
     }
     val primary = MaterialTheme.colorScheme.primary
     val tint by animateColorAsState(
@@ -400,9 +440,9 @@ private fun Bubble(
     }
     // A one-time code reads as a link: underlined, bold, in the accent on the other side's
     // bubbles and in the text colour on this side's, which are already the accent.
-    val code = remember(message.body) { findOneTimeCode(message.body) }
+    val code = remember(message.body, hidden) { if (hidden) null else findOneTimeCode(message.body) }
     val linkColour = if (outgoing || failed) textColour else MaterialTheme.colorScheme.primary
-    val shown = markMatches(message.body, highlight, marked).let { base ->
+    val shown = (if (hidden) AnnotatedString(body) else markMatches(message.body, highlight, marked)).let { base ->
         if (code == null || onCopyCode == null) return@let base
         buildAnnotatedString {
             append(base)
@@ -461,14 +501,26 @@ private fun Bubble(
                     .padding(horizontal = 14.dp, vertical = 9.dp),
                 fontSize = 16.sp,
                 color = textColour,
+                fontStyle = if (hidden) FontStyle.Italic else FontStyle.Normal,
             )
         }
-        Text(
-            listOfNotNull(time, simLabel, state).joinToString(" · "),
-            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            fontSize = 11.sp,
-            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Locked messages carry a small lock by their time, shown or hidden.
+            if (locked) {
+                Icon(
+                    painterResource(R.drawable.ic_lock),
+                    contentDescription = null,
+                    modifier = Modifier.size(11.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(
+                listOfNotNull(time, simLabel, state).joinToString(" · "),
+                fontSize = 11.sp,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -477,11 +529,13 @@ private fun Bubble(
 private fun ConversationMenu(
     flags: Flags,
     blocked: Boolean,
+    threadLocked: Boolean,
     onShowDetails: () -> Unit,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onBlockChange: (Boolean) -> Unit,
+    onLockChange: (Boolean) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -524,6 +578,14 @@ private fun ConversationMenu(
                 },
             )
             DropdownMenuItem(
+                text = { Text(stringResource(if (threadLocked) R.string.unlock_conversation else R.string.lock_conversation)) },
+                leadingIcon = { Icon(painterResource(if (threadLocked) R.drawable.ic_lock_open else R.drawable.ic_lock), null) },
+                onClick = {
+                    open = false
+                    onLockChange(!threadLocked)
+                },
+            )
+            DropdownMenuItem(
                 text = { Text(stringResource(if (blocked) R.string.unblock_number else R.string.block_number)) },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_block), null) },
                 onClick = {
@@ -551,3 +613,24 @@ private val MessageSelectionSaver = Saver<Set<Long>, LongArray>(
 /** How long a message opened from search stays tinted, and how long the tint takes to fade. */
 private const val FOCUS_FLASH_MILLIS = 2_000L
 private const val FLASH_FADE_MILLIS = 600
+
+/** In place of a locked conversation: what it is, and a button to confirm the screen lock. */
+@Composable
+private fun LockedPane(onUnlock: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_lock),
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.conversation_locked), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onUnlock) { Text(stringResource(R.string.unlock)) }
+    }
+}

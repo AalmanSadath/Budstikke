@@ -23,6 +23,10 @@ data class Conversation(
     val blocked: Boolean = false,
     /** Text typed in the conversation and not sent, if any. */
     val draft: String? = null,
+    /** The conversation is locked, or its newest message is: the snippet stays hidden. */
+    val snippetLocked: Boolean = false,
+    /** The conversation is locked, or holds a locked message: deleting it asks to unlock. */
+    val hasLocked: Boolean = false,
 ) {
     val folder: Folder
         get() = when {
@@ -54,6 +58,7 @@ class ConversationRepository(context: Context) {
     private val flags = ConversationFlags.get(context)
     private val blocks = BlockList.get(context)
     private val drafts = Drafts.get(context)
+    private val locks = Locks.get(context)
 
     /**
      * Emits one folder's conversations now, and again whenever the SMS store, contacts,
@@ -61,7 +66,7 @@ class ConversationRepository(context: Context) {
      * first; within each part the newest is first.
      */
     fun conversations(folder: Folder): Flow<List<Conversation>> =
-        merge(resolver.smsChanges(), contacts.changes(), flags.changes(), blocks.changes(), drafts.changes())
+        merge(resolver.smsChanges(), contacts.changes(), flags.changes(), blocks.changes(), drafts.changes(), locks.changes())
             .conflate()
             .map { load()?.filter { it.folder == folder }?.sortedByDescending { it.flags.pinned } }
             .flowOn(Dispatchers.IO)
@@ -87,13 +92,14 @@ class ConversationRepository(context: Context) {
     /**
      * Conversations in every folder that match [query] by contact name, number or sender
      * name, newest first, then those where only a message's text matches, by that message's
-     * date. Call off the main thread.
+     * date. Locked text is searched only when [includeLocked], so a search cannot show what
+     * a lock hides. Call off the main thread.
      */
-    fun search(query: String): List<SearchResult> {
+    fun search(query: String, includeLocked: Boolean): List<SearchResult> {
         val q = query.trim()
         if (q.isEmpty()) return emptyList()
         val all = load() ?: return emptyList()
-        val messages = matchingMessages(q)
+        val messages = matchingMessages(q, if (includeLocked) null else locks.state())
         val byName = all.filter { matchesConversation(it.title, it.address, q) }
         val named = byName.mapTo(HashSet()) { it.threadId }
         val byText = all
@@ -104,7 +110,7 @@ class ConversationRepository(context: Context) {
     }
 
     /** The newest message in each thread whose text holds [query], case-insensitively. */
-    private fun matchingMessages(query: String): Map<Long, MatchedMessage> {
+    private fun matchingMessages(query: String, hidden: LockState?): Map<Long, MatchedMessage> {
         val found = HashMap<Long, MatchedMessage>()
         resolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -116,6 +122,7 @@ class ConversationRepository(context: Context) {
             while (c.moveToNext()) {
                 val thread = c.getLong(0)
                 if (thread in found) continue
+                if (hidden != null && hidden.isLocked(thread, c.getLong(4))) continue
                 found[thread] = MatchedMessage(
                     id = c.getLong(4),
                     body = c.getString(1).orEmpty(),
@@ -137,7 +144,10 @@ class ConversationRepository(context: Context) {
             Telephony.Sms.DATE,
             Telephony.Sms.TYPE,
             Telephony.Sms.READ,
+            Telephony.Sms._ID,
         )
+        val lockState = locks.state()
+        val withLocked = HashSet<Long>()
         val cursor = resolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
@@ -152,8 +162,11 @@ class ConversationRepository(context: Context) {
             val date = c.getColumnIndexOrThrow(Telephony.Sms.DATE)
             val type = c.getColumnIndexOrThrow(Telephony.Sms.TYPE)
             val read = c.getColumnIndexOrThrow(Telephony.Sms.READ)
+            val id = c.getColumnIndexOrThrow(Telephony.Sms._ID)
             while (c.moveToNext()) {
                 val threadId = c.getLong(thread)
+                val messageLocked = c.getLong(id) in lockState.messages
+                if (messageLocked) withLocked += threadId
                 val isInbox = c.getInt(type) == Telephony.Sms.MESSAGE_TYPE_INBOX
                 if (isInbox && c.getInt(read) == 0) {
                     unread[threadId] = (unread[threadId] ?: 0) + 1
@@ -166,12 +179,14 @@ class ConversationRepository(context: Context) {
                         dateMillis = c.getLong(date),
                         lastFromMe = !isInbox,
                         unreadCount = 0,
+                        snippetLocked = messageLocked,
                     )
                 }
             }
         }
         flags.forgetAllBut(latest.keys)
         drafts.forgetAllBut(latest.keys)
+        locks.forgetThreadsBut(latest.keys)
         val allFlags = flags.all()
         val allDrafts = drafts.all()
         // Rows come newest first, so insertion order is already date order.
@@ -182,6 +197,8 @@ class ConversationRepository(context: Context) {
                 flags = allFlags[it.threadId] ?: Flags(),
                 blocked = blocks.isBlocked(it.address),
                 draft = allDrafts[it.threadId],
+                snippetLocked = it.snippetLocked || it.threadId in lockState.threads,
+                hasLocked = it.threadId in lockState.threads || it.threadId in withLocked,
             )
         }
     }

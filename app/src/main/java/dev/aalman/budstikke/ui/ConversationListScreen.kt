@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.Conversation
+import dev.aalman.budstikke.lock.LockSession
+import androidx.compose.runtime.collectAsState
 
 /**
  * The main list, or the archive when [archive] is true. Long-pressing a row starts selecting;
@@ -214,10 +216,14 @@ internal fun ConversationRow(
     } else {
         ""
     }
+    // Locked text stays hidden here until the screen lock is confirmed, a draft included.
+    val unlocked by LockSession.unlocked.collectAsState()
+    val hidden = conversation.snippetLocked && !unlocked
     // An unsent draft stands in for the last message, as it is what was left to do here.
-    val draft = conversation.draft
+    val draft = conversation.draft.takeUnless { hidden }
     val draftLabel = stringResource(R.string.draft_label)
     val snippet = when {
+        hidden -> stringResource(R.string.locked_message)
         draft != null -> "$draftLabel $draft"
         conversation.lastFromMe -> stringResource(R.string.you_prefix, conversation.snippet)
         else -> conversation.snippet
@@ -284,6 +290,15 @@ internal fun ConversationRow(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hidden) {
+                    Icon(
+                        painterResource(R.drawable.ic_lock),
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(
                     shownSnippet,
                     Modifier.weight(1f),

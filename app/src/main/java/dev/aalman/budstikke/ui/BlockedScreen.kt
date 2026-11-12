@@ -1,5 +1,7 @@
 package dev.aalman.budstikke.ui
 
+import androidx.compose.runtime.collectAsState
+import dev.aalman.budstikke.lock.LockSession
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -83,7 +85,13 @@ private fun BlockedRow(entry: BlockedEntry, onOpen: (Conversation) -> Unit, onUn
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     val conversation = entry.conversation
-    val summary = conversation?.snippet ?: stringResource(R.string.blocked_no_messages)
+    val unlocked by LockSession.unlocked.collectAsState()
+    val summary = when {
+        conversation == null -> stringResource(R.string.blocked_no_messages)
+        // Locked text stays hidden here as in the main list.
+        conversation.snippetLocked && !unlocked -> stringResource(R.string.locked_message)
+        else -> conversation.snippet
+    }
     val time = conversation?.let { listTime(context, it.dateMillis) }
     Box {
         Row(

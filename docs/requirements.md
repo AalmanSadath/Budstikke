@@ -148,11 +148,11 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R15. Message lock behind biometrics
 
-- [ ] A message, or a whole conversation, can be locked from its long-press menu.
-- [ ] A locked message's text is hidden in the conversation, the list and notifications until
+- [x] A message, or a whole conversation, can be locked from its long-press menu.
+- [x] A locked message's text is hidden in the conversation, the list and notifications until
       fingerprint, face or device PIN is confirmed.
-- [ ] After unlocking, the text stays visible until the app goes to the background.
-- [ ] "Select all" does not select locked messages; a locked message cannot be deleted without
+- [x] After unlocking, the text stays visible until the app goes to the background.
+- [x] "Select all" does not select locked messages; a locked message cannot be deleted without
       unlocking first.
 
 ## R16. One-time codes highlighted

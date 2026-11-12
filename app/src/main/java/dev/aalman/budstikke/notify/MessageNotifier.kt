@@ -18,6 +18,7 @@ import androidx.core.net.toUri
 import dev.aalman.budstikke.MainActivity
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.data.Locks
 
 /**
  * One notification per conversation, listing its unread messages. It is rebuilt from the
@@ -58,7 +59,13 @@ class MessageNotifier(context: Context) {
             .build()
         val me = Person.Builder().setName(context.getString(R.string.notification_you)).build()
         val style = NotificationCompat.MessagingStyle(me)
-        unread.forEach { style.addMessage(it.body, it.dateMillis, sender) }
+        // A locked conversation's or message's text stays off the lock screen and the shade.
+        val locks = Locks.get(context).state()
+        val lockedText = context.getString(R.string.locked_message)
+        unread.forEach {
+            val body = if (locks.isLocked(threadId, it.id)) lockedText else it.body
+            style.addMessage(body, it.dateMillis, sender)
+        }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -150,20 +157,20 @@ class MessageNotifier(context: Context) {
             .setClass(context, NotificationActionReceiver::class.java)
             .putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, threadId)
 
-    private data class Unread(val address: String, val body: String, val dateMillis: Long)
+    private data class Unread(val id: Long, val address: String, val body: String, val dateMillis: Long)
 
     /** The thread's unread received messages, oldest first, at most the last [MAX_LINES]. */
     private fun unreadMessages(threadId: Long): List<Unread> {
         val rows = ArrayList<Unread>()
         context.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
-            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms._ID),
             "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
             arrayOf(threadId.toString()),
             "${Telephony.Sms.DATE} DESC LIMIT $MAX_LINES",
         )?.use { c ->
             while (c.moveToNext()) {
-                rows += Unread(c.getString(0).orEmpty(), c.getString(1).orEmpty(), c.getLong(2))
+                rows += Unread(c.getLong(3), c.getString(0).orEmpty(), c.getString(1).orEmpty(), c.getLong(2))
             }
         }
         return rows.asReversed()
