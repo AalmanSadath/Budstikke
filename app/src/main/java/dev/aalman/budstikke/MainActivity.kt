@@ -1,5 +1,10 @@
 package dev.aalman.budstikke
 
+import dev.aalman.budstikke.ui.DetailsScreen
+import android.provider.ContactsContract
+import android.net.Uri
+import android.graphics.Rect
+import android.content.ActivityNotFoundException
 import android.Manifest
 import android.app.role.RoleManager
 import android.content.Context
@@ -413,8 +418,42 @@ private fun ConversationRoute(
         MessageNotifier(context).cancel(thread.threadId)
     }
 
+    val onArchiveChange: (Boolean) -> Unit = { archived ->
+        scope.launch(Dispatchers.IO) { flagStore.setArchived(listOf(thread.threadId), archived) }
+        // An archived conversation leaves the list it was opened from, so go back to it.
+        if (archived) onBack()
+    }
+    val onBlockChange: (Boolean) -> Unit = { block ->
+        if (block) {
+            val title = contact?.name ?: thread.address
+            blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
+            // The conversation moves to Spam & blocked, out of the list it was opened from.
+            onBack()
+        } else {
+            scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
+        }
+    }
+    // The details screen stands in for the conversation, so back from it returns here.
+    var showDetails by rememberSaveable(thread.threadId) { mutableStateOf(false) }
+    if (showDetails) {
+        BackHandler { showDetails = false }
+        DetailsScreen(
+            address = thread.address,
+            contact = contact,
+            flags = flags,
+            blocked = blocked,
+            onCall = { openExternal(context, Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", thread.address, null))) },
+            onContact = { openContact(context, contact, thread.address) },
+            onBlockChange = onBlockChange,
+            onArchiveChange = onArchiveChange,
+            onBack = { showDetails = false },
+        )
+        return
+    }
+
     ConversationScreen(
         address = thread.address,
+        onShowDetails = { showDetails = true },
         focusMessageId = thread.focusMessageId,
         highlight = thread.highlight,
         contact = contact,
@@ -452,11 +491,7 @@ private fun ConversationRoute(
         onPinChange = { pinned ->
             scope.launch(Dispatchers.IO) { flagStore.setPinned(listOf(thread.threadId), pinned) }
         },
-        onArchiveChange = { archived ->
-            scope.launch(Dispatchers.IO) { flagStore.setArchived(listOf(thread.threadId), archived) }
-            // An archived conversation leaves the list it was opened from, so go back to it.
-            if (archived) onBack()
-        },
+        onArchiveChange = onArchiveChange,
         onDeleteMessages = { ids ->
             scope.launch {
                 val item = withContext(Dispatchers.IO) { trash.deleteMessages(thread.address, ids) }
@@ -467,16 +502,7 @@ private fun ConversationRoute(
             }
         },
         blocked = blocked,
-        onBlockChange = { block ->
-            if (block) {
-                val title = contact?.name ?: thread.address
-                blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
-                // The conversation moves to Spam & blocked, out of the list it was opened from.
-                onBack()
-            } else {
-                scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
-            }
-        },
+        onBlockChange = onBlockChange,
         onDeleteConversation = {
             deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
             onBack()
@@ -727,4 +753,34 @@ private fun TrashRoute(undo: UndoQueue, onBack: () -> Unit) {
         onEmpty = { scope.launch(Dispatchers.IO) { trash.empty() } },
         onBack = onBack,
     )
+}
+
+/** Starts another app's screen, doing nothing when no app on the phone handles it. */
+private fun openExternal(context: Context, intent: Intent) {
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+    }
+}
+
+/**
+ * Opens a saved contact in the contacts app, or offers to save [address] as a new one.
+ * QuickContact opens work profile contacts too, which a plain view intent cannot reach.
+ */
+private fun openContact(context: Context, contact: Contact?, address: String) {
+    val uri = contact?.lookupUri
+    if (uri != null) {
+        try {
+            ContactsContract.QuickContact.showQuickContact(context, Rect(), uri, ContactsContract.QuickContact.MODE_LARGE, null)
+        } catch (_: ActivityNotFoundException) {
+            openExternal(context, Intent(Intent.ACTION_VIEW, uri))
+        }
+    } else {
+        openExternal(
+            context,
+            Intent(ContactsContract.Intents.Insert.ACTION)
+                .setType(ContactsContract.RawContacts.CONTENT_TYPE)
+                .putExtra(ContactsContract.Intents.Insert.PHONE, address),
+        )
+    }
 }

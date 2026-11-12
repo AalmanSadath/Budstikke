@@ -89,6 +89,7 @@ fun ConversationScreen(
     onPendingAction: (PendingMessage, PendingAction) -> Unit,
     onSchedule: () -> Unit,
     onBack: () -> Unit,
+    onShowDetails: () -> Unit = {},
     focusMessageId: Long? = null,
     highlight: String? = null,
 ) {
@@ -125,8 +126,13 @@ fun ConversationScreen(
                 }
             }
         } else {
-            TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
-                ConversationMenu(flags, blocked, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
+            TopBar(
+                contact?.name ?: address,
+                onBack = onBack,
+                leading = { Avatar(address, contact, size = 32.dp) },
+                onTitleClick = onShowDetails,
+            ) {
+                ConversationMenu(flags, blocked, onShowDetails, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
             }
         }
         val listState = rememberLazyListState()
@@ -433,6 +439,7 @@ private fun Bubble(
 private fun ConversationMenu(
     flags: Flags,
     blocked: Boolean,
+    onShowDetails: () -> Unit,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
     onDelete: () -> Unit,
@@ -448,6 +455,14 @@ private fun ConversationMenu(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.details)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_person), null) },
+                onClick = {
+                    open = false
+                    onShowDetails()
+                },
+            )
             // A blocked conversation lives only in Spam & blocked, so pins and the archive
             // have nothing to act on until it is unblocked.
             if (!flags.archived && !blocked) {

@@ -29,6 +29,8 @@ data class Contact(
     val version: Int = 0,
     /** Saved in the work profile rather than the personal one. */
     val work: Boolean = false,
+    /** Opens this contact in the contacts app, where it can be seen and edited. */
+    val lookupUri: Uri? = null,
 )
 
 /** One saved number of a contact, as found by [ContactRepository.search]. */
@@ -194,6 +196,7 @@ class ContactRepository private constructor(context: Context) {
                     ContactsContract.PhoneLookup.DISPLAY_NAME,
                     ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI,
                     ContactsContract.PhoneLookup._ID,
+                    ContactsContract.PhoneLookup.LOOKUP_KEY,
                 ),
                 null,
                 null,
@@ -201,11 +204,13 @@ class ContactRepository private constructor(context: Context) {
             )?.use { c ->
                 if (!c.moveToFirst()) return@use null
                 val name = c.getString(0)?.takeIf { it.isNotBlank() } ?: return@use null
+                val id = c.getLong(2)
                 Contact(
                     name,
                     c.getString(1)?.let(Uri::parse),
                     version.value,
-                    work = ContactsContract.Contacts.isEnterpriseContactId(c.getLong(2)),
+                    work = ContactsContract.Contacts.isEnterpriseContactId(id),
+                    lookupUri = c.getString(3)?.let { ContactsContract.Contacts.getLookupUri(id, it) },
                 )
             }
         }.getOrNull()

@@ -115,12 +115,12 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R11. Block numbers
 
-- [ ] A number can be blocked from the conversation's contact details screen ("Block number")
+- [x] A number can be blocked from the conversation's contact details screen ("Block number")
       and from the list.
-- [ ] Messages from a blocked number produce no notification and do not appear in the main
+- [x] Messages from a blocked number produce no notification and do not appear in the main
       list; they are kept in a "Spam & blocked" folder.
-- [ ] Blocked numbers can be listed and unblocked in settings.
-- [ ] Messages from blocked numbers do not count towards the launcher badge.
+- [x] Blocked numbers can be listed and unblocked in settings.
+- [x] Messages from blocked numbers do not count towards the launcher badge.
 
 ## R12. Drafts
 
