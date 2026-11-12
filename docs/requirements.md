@@ -157,10 +157,10 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R16. One-time codes highlighted
 
-- [ ] In a message containing a one-time code ("Your code is 482913"), the code is highlighted
+- [x] In a message containing a one-time code ("Your code is 482913"), the code is highlighted
       and underlined like a link.
-- [ ] Tapping the code copies it to the clipboard and confirms with a short message.
-- [ ] Plain numbers that are not codes (amounts, dates, phone numbers) are not highlighted.
+- [x] Tapping the code copies it to the clipboard and confirms with a short message.
+- [x] Plain numbers that are not codes (amounts, dates, phone numbers) are not highlighted.
 
 ## R17. Delayed sending
 

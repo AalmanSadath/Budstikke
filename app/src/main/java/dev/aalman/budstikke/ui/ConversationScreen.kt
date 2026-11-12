@@ -1,5 +1,13 @@
 package dev.aalman.budstikke.ui
 
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import dev.aalman.budstikke.sms.findOneTimeCode
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.scrollBy
@@ -90,6 +98,7 @@ fun ConversationScreen(
     onSchedule: () -> Unit,
     onBack: () -> Unit,
     onShowDetails: () -> Unit = {},
+    onCopyCode: (String) -> Unit = {},
     focusMessageId: Long? = null,
     highlight: String? = null,
 ) {
@@ -205,6 +214,8 @@ fun ConversationScreen(
                     isSelected = message.id in selected,
                     flash = message.id == flashId,
                     highlight = highlight,
+                    // While selecting, a tap on the code selects like a tap anywhere else.
+                    onCopyCode = if (selecting) null else onCopyCode,
                     onClick = {
                         when {
                             selecting -> toggle()
@@ -349,6 +360,7 @@ private fun Bubble(
     isSelected: Boolean,
     flash: Boolean,
     highlight: String?,
+    onCopyCode: ((String) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -381,6 +393,32 @@ private fun Bubble(
     val marked = MaterialTheme.colorScheme.let { colors ->
         SpanStyle(background = colors.tertiaryContainer, color = colors.onTertiaryContainer)
     }
+    val textColour = when {
+        failed -> MaterialTheme.colorScheme.onErrorContainer
+        outgoing -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    // A one-time code reads as a link: underlined, bold, in the accent on the other side's
+    // bubbles and in the text colour on this side's, which are already the accent.
+    val code = remember(message.body) { findOneTimeCode(message.body) }
+    val linkColour = if (outgoing || failed) textColour else MaterialTheme.colorScheme.primary
+    val shown = markMatches(message.body, highlight, marked).let { base ->
+        if (code == null || onCopyCode == null) return@let base
+        buildAnnotatedString {
+            append(base)
+            addLink(
+                LinkAnnotation.Clickable(
+                    tag = "one-time-code",
+                    styles = TextLinkStyles(
+                        SpanStyle(color = linkColour, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline),
+                    ),
+                ) { onCopyCode(code.code) },
+                code.range.first,
+                code.range.last + 1,
+            )
+        }
+    }
+    val copyCodeLabel = code?.let { stringResource(R.string.copy_code, it.code) }
     Column(
         Modifier
             .fillMaxWidth()
@@ -389,6 +427,10 @@ private fun Bubble(
             .clearAndSetSemantics {
                 contentDescription = description
                 selected = isSelected
+                // The text's own link is hidden by clearing, so TalkBack gets it as an action.
+                if (code != null && onCopyCode != null && copyCodeLabel != null) {
+                    customActions = listOf(CustomAccessibilityAction(copyCodeLabel) { onCopyCode(code.code); true })
+                }
             }
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(2.dp),
@@ -406,7 +448,7 @@ private fun Bubble(
             horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
         ) {
             Text(
-                markMatches(message.body, highlight, marked),
+                shown,
                 Modifier
                     .clip(shape)
                     .background(
@@ -418,11 +460,7 @@ private fun Bubble(
                     )
                     .padding(horizontal = 14.dp, vertical = 9.dp),
                 fontSize = 16.sp,
-                color = when {
-                    failed -> MaterialTheme.colorScheme.onErrorContainer
-                    outgoing -> MaterialTheme.colorScheme.onPrimary
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+                color = textColour,
             )
         }
         Text(

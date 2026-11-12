@@ -1,5 +1,9 @@
 package dev.aalman.budstikke
 
+import android.os.PersistableBundle
+import android.content.ClipboardManager
+import android.content.ClipDescription
+import android.content.ClipData
 import dev.aalman.budstikke.ui.DetailsScreen
 import android.provider.ContactsContract
 import android.net.Uri
@@ -454,6 +458,16 @@ private fun ConversationRoute(
     ConversationScreen(
         address = thread.address,
         onShowDetails = { showDetails = true },
+        onCopyCode = { code ->
+            copyCode(context, code)
+            // Android 13 and later confirm a copy themselves; earlier ones do not.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                scope.launch {
+                    undo.snackbar.currentSnackbarData?.dismiss()
+                    undo.snackbar.showSnackbar(resources.getString(R.string.code_copied))
+                }
+            }
+        },
         focusMessageId = thread.focusMessageId,
         highlight = thread.highlight,
         contact = contact,
@@ -783,4 +797,16 @@ private fun openContact(context: Context, contact: Contact?, address: String) {
                 .putExtra(ContactsContract.Intents.Insert.PHONE, address),
         )
     }
+}
+
+/**
+ * Puts a one-time code on the clipboard, marked sensitive so that Android 13 and later keep
+ * it out of the clipboard preview and keyboard suggestions.
+ */
+private fun copyCode(context: Context, code: String) {
+    val clip = ClipData.newPlainText(context.getString(R.string.one_time_code), code)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+    }
+    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
 }
