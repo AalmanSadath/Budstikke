@@ -77,6 +77,23 @@ import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.Message
 import dev.aalman.budstikke.data.MessageState
 import dev.aalman.budstikke.sms.Sim
+import dev.aalman.budstikke.sms.REACTION_EMOJI
+import dev.aalman.budstikke.sms.foldReactions
+import dev.aalman.budstikke.data.MarkState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.layout.layout
+import androidx.compose.material3.Surface
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 
 /** One conversation: its messages, newest at the bottom, and the field to reply. */
 @Composable
@@ -112,14 +129,28 @@ fun ConversationScreen(
     onLockConversation: (Boolean) -> Unit = {},
     focusMessageId: Long? = null,
     highlight: String? = null,
+    marks: MarkState = MarkState(),
+    onReact: (Message, String) -> Unit = { _, _ -> },
+    onCopy: (List<Message>) -> Unit = {},
+    onForward: (Message) -> Unit = {},
+    onStar: (Set<Long>, Boolean) -> Unit = { _, _ -> },
 ) {
+    // Reactions that came, or went out, as texts are drawn on the message they quote
+    // rather than as messages of their own.
+    val folded = remember(messages) { foldReactions(messages) }
+    val shown = folded.shown
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
     var selected by rememberSaveable(address, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
-    LaunchedEffect(messages) {
-        val present = messages.mapTo(HashSet()) { it.id }
+    LaunchedEffect(shown) {
+        val present = shown.mapTo(HashSet()) { it.id }
         if (!present.containsAll(selected)) selected = selected intersect present
     }
     val selecting = selected.isNotEmpty()
+    // The emoji bar shows over one held-down message, unless its text is locked away.
+    val barFor = selected.singleOrNull()?.takeUnless { it in locks.messages && !unlocked }
+    // While it shows, a tap anywhere below the top bar closes it and ends the selection;
+    // holding another message down still adds that one.
+    val closeBar = remember { { selected = emptySet() } }
     BackHandler(enabled = selecting) { selected = emptySet() }
     Column(
         Modifier
@@ -140,23 +171,42 @@ fun ConversationScreen(
                     }
                 },
             ) {
-                // Left of Delete, so Delete keeps the place it has always had.
-                BarAction(R.drawable.ic_select_all, R.string.select_all) {
-                    // Locked messages are left out, so they are never deleted along with the rest.
-                    selected = messages.filterNot { locks.isLocked(threadId, it.id) }.mapTo(HashSet()) { it.id }
-                }
-                val allLocked = selected.all { it in locks.messages }
-                BarAction(if (allLocked) R.drawable.ic_lock_open else R.drawable.ic_lock, if (allLocked) R.string.unlock else R.string.lock) {
-                    val ids = selected
+                val chosen = shown.filter { it.id in selected }
+                // Copying or forwarding a locked message's text needs the screen lock first.
+                val needsUnlock = !unlocked && chosen.any { it.id in locks.messages }
+                val withText: (() -> Unit) -> Unit = { then ->
                     selected = emptySet()
-                    // Taking a lock off needs the screen lock; putting one on does not.
-                    if (allLocked) onUnlock { onLockMessages(ids, false) } else onLockMessages(ids, true)
+                    if (needsUnlock) onUnlock(then) else then()
+                }
+                BarAction(R.drawable.ic_copy, R.string.copy) { withText { onCopy(chosen) } }
+                chosen.singleOrNull()?.let { only ->
+                    BarAction(R.drawable.ic_forward, R.string.forward) { withText { onForward(only) } }
+                }
+                val allStarred = selected.all { it in marks.starred }
+                BarAction(if (allStarred) R.drawable.ic_star else R.drawable.ic_star_outline, if (allStarred) R.string.unstar else R.string.star) {
+                    onStar(selected, !allStarred)
+                    selected = emptySet()
                 }
                 BarAction(R.drawable.ic_delete, R.string.delete) {
-                    val ids = selected
+                    // Reaction texts pointing at a deleted message go with it.
+                    val ids = selected + selected.flatMap { folded.carriers[it].orEmpty() }
                     selected = emptySet()
                     if (ids.any { it in locks.messages }) onUnlock { onDeleteMessages(ids) } else onDeleteMessages(ids)
                 }
+                val allLocked = selected.all { it in locks.messages }
+                SelectionMenu(
+                    allLocked = allLocked,
+                    onSelectAll = {
+                        // Locked messages are left out, so they are never deleted along with the rest.
+                        selected = shown.filterNot { locks.isLocked(threadId, it.id) }.mapTo(HashSet()) { it.id }
+                    },
+                    onLockChange = {
+                        val ids = selected
+                        selected = emptySet()
+                        // Taking a lock off needs the screen lock; putting one on does not.
+                        if (allLocked) onUnlock { onLockMessages(ids, false) } else onLockMessages(ids, true)
+                    },
+                )
             }
         } else {
             TopBar(
@@ -172,7 +222,7 @@ fun ConversationScreen(
             }
         }
         val listState = rememberLazyListState()
-        val newest = messages.lastOrNull()
+        val newest = shown.lastOrNull()
         // Opened at a message, from search: the list goes there once messages load, and that
         // message is tinted for a moment so the eye finds it. Until the person drags the list,
         // sends or schedules, the list stays anchored there: messages loading, a pending one
@@ -180,16 +230,16 @@ fun ConversationScreen(
         var anchored by remember(focusMessageId) { mutableStateOf(focusMessageId != null) }
         var focusDone by remember(focusMessageId) { mutableStateOf(focusMessageId == null) }
         var flashId by remember(focusMessageId) { mutableStateOf<Long?>(null) }
-        LaunchedEffect(focusMessageId, messages.isNotEmpty()) {
-            if (focusDone || messages.isEmpty()) return@LaunchedEffect
+        LaunchedEffect(focusMessageId, shown.isNotEmpty()) {
+            if (focusDone || shown.isEmpty()) return@LaunchedEffect
             focusDone = true
-            val at = messages.indexOfFirst { it.id == focusMessageId }
+            val at = shown.indexOfFirst { it.id == focusMessageId }
             if (at < 0) {
                 anchored = false
                 return@LaunchedEffect
             }
             // Bottom up, with pending messages below the rest.
-            listState.scrollToItem(pending.size + messages.lastIndex - at)
+            listState.scrollToItem(pending.size + shown.lastIndex - at)
             // Lift it from the bottom edge to about a third of the way up.
             listState.scrollBy(-listState.layoutInfo.viewportSize.height / 3f)
             flashId = focusMessageId
@@ -229,7 +279,8 @@ fun ConversationScreen(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .clearFocusOnTap(focusManager),
+                .clearFocusOnTap(focusManager)
+                .onTapAnywhere(barFor != null, closeBar),
             state = listState,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -239,7 +290,7 @@ fun ConversationScreen(
             items(pending.asReversed(), key = { "pending:${it.id}" }) { message ->
                 PendingBubble(message, onPendingAction)
             }
-            items(messages.asReversed(), key = { it.id }) { message ->
+            items(shown.asReversed(), key = { it.id }) { message ->
                 val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
                 Bubble(
                     message,
@@ -249,10 +300,20 @@ fun ConversationScreen(
                     highlight = highlight,
                     locked = message.id in locks.messages,
                     hidden = message.id in locks.messages && !unlocked,
+                    starred = message.id in marks.starred,
+                    mine = marks.reactions[message.id],
+                    theirs = folded.theirs[message.id],
+                    // One message held down offers the emoji; a locked one only once it shows.
+                    reactionBar = barFor == message.id,
+                    onReact = { emoji ->
+                        selected = emptySet()
+                        onReact(message, emoji)
+                    },
                     // While selecting, a tap on the code selects like a tap anywhere else.
                     onCopyCode = if (selecting) null else onCopyCode,
                     onClick = {
                         when {
+                            barFor != null -> selected = emptySet()
                             selecting -> toggle()
                             message.id in locks.messages && !unlocked -> onUnlock {}
                             message.state == MessageState.Failed -> onRetry(message)
@@ -272,7 +333,7 @@ fun ConversationScreen(
                 anchored = false
                 onSend()
             },
-            modifier = Modifier.navigationBarsPadding(),
+            modifier = Modifier.navigationBarsPadding().onTapAnywhere(barFor != null, closeBar),
             onSchedule = {
                 anchored = false
                 onSchedule()
@@ -398,6 +459,11 @@ private fun Bubble(
     highlight: String?,
     locked: Boolean,
     hidden: Boolean,
+    starred: Boolean,
+    mine: String?,
+    theirs: String?,
+    reactionBar: Boolean,
+    onReact: (String) -> Unit,
     onCopyCode: ((String) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -415,11 +481,18 @@ private fun Bubble(
     }
     // A locked message keeps its text out of the bubble and out of TalkBack until unlocked.
     val body = if (hidden) stringResource(R.string.locked_message) else message.body
-    val description = if (outgoing) {
-        stringResource(R.string.message_from_you, time, body, state.orEmpty())
-    } else {
-        stringResource(R.string.message_from_them, time, body)
-    }
+    val reactions = listOfNotNull(
+        mine?.let { stringResource(R.string.reaction_yours, it) },
+        theirs?.let { stringResource(R.string.reaction_theirs, it) },
+    )
+    val description = (
+        if (outgoing) {
+            stringResource(R.string.message_from_you, time, body, state.orEmpty())
+        } else {
+            stringResource(R.string.message_from_them, time, body)
+        }
+        ) + if (reactions.isEmpty()) "" else ". ${stringResource(R.string.reactions_label)}: ${reactions.joinToString(", ")}"
+    val align = if (outgoing) Alignment.End else Alignment.Start
     val primary = MaterialTheme.colorScheme.primary
     val tint by animateColorAsState(
         when {
@@ -459,66 +532,197 @@ private fun Bubble(
         }
     }
     val copyCodeLabel = code?.let { stringResource(R.string.copy_code, it.code) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(tint)
-            .clearAndSetSemantics {
-                contentDescription = description
-                selected = isSelected
-                // The text's own link is hidden by clearing, so TalkBack gets it as an action.
-                if (code != null && onCopyCode != null && copyCodeLabel != null) {
-                    customActions = listOf(CustomAccessibilityAction(copyCodeLabel) { onCopyCode(code.code); true })
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = align) {
+        if (reactionBar) ReactionBar(mine, alignEnd = outgoing, onReact)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(tint)
+                .clearAndSetSemantics {
+                    contentDescription = description
+                    selected = isSelected
+                    // The text's own link is hidden by clearing, so TalkBack gets it as an action.
+                    if (code != null && onCopyCode != null && copyCodeLabel != null) {
+                        customActions = listOf(CustomAccessibilityAction(copyCodeLabel) { onCopyCode(code.code); true })
+                    }
+                }
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(2.dp),
+            horizontalAlignment = align,
+        ) {
+            val shape = RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (outgoing) 18.dp else 4.dp,
+                bottomEnd = if (outgoing) 4.dp else 18.dp,
+            )
+            // A bubble is never wider than 80% of the screen, and hugs its text below that.
+            Column(
+                Modifier.fillMaxWidth(0.8f),
+                horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
+            ) {
+                Text(
+                    shown,
+                    Modifier
+                        .clip(shape)
+                        .background(
+                            when {
+                                failed -> MaterialTheme.colorScheme.errorContainer
+                                outgoing -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                        )
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    fontSize = 16.sp,
+                    color = textColour,
+                    fontStyle = if (hidden) FontStyle.Italic else FontStyle.Normal,
+                )
+                if (mine != null || theirs != null) ReactionChip(listOfNotNull(theirs, mine).distinct(), mine != null)
+            }
+            Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (starred) {
+                    Icon(
+                        painterResource(R.drawable.ic_star),
+                        contentDescription = null,
+                        modifier = Modifier.size(11.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                }
+                // Locked messages carry a small lock by their time, shown or hidden.
+                if (locked) {
+                    Icon(
+                        painterResource(R.drawable.ic_lock),
+                        contentDescription = null,
+                        modifier = Modifier.size(11.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                }
+                Text(
+                    listOfNotNull(time, simLabel, state).joinToString(" · "),
+                    fontSize = 11.sp,
+                    color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The emoji offered over a message held down, floating above it over the rest of the list,
+ * or below it when it sits too near the top. The one this phone already put on it is
+ * ringed, and tapping it again takes it off.
+ */
+@Composable
+private fun ReactionBar(mine: String?, alignEnd: Boolean, onReact: (String) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    val position = remember(alignEnd, gap) { FloatAbove(alignEnd, gap) }
+    // Not focusable, so a tap on the list still reaches the list and Back still clears
+    // the selection, which closes this.
+    Popup(popupPositionProvider = position, properties = PopupProperties(focusable = false)) {
+        Surface(shape = RoundedCornerShape(24.dp), color = colors.surfaceContainerHighest, shadowElevation = 6.dp) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(4.dp)) {
+                REACTION_EMOJI.forEach { emoji ->
+                    val chosen = emoji == mine
+                    val label = stringResource(if (chosen) R.string.remove_reaction else R.string.react_with, emoji)
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (chosen) colors.primary.copy(alpha = 0.25f) else Color.Transparent)
+                            .clearAndSetSemantics {
+                                contentDescription = label
+                                selected = chosen
+                            }
+                            .clickable { onReact(emoji) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(emoji, fontSize = 24.sp)
+                    }
                 }
             }
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(2.dp),
-        horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
-    ) {
-        val shape = RoundedCornerShape(
-            topStart = 18.dp,
-            topEnd = 18.dp,
-            bottomStart = if (outgoing) 18.dp else 4.dp,
-            bottomEnd = if (outgoing) 4.dp else 18.dp,
-        )
-        // A bubble is never wider than 80% of the screen, and hugs its text below that.
-        Column(
-            Modifier.fillMaxWidth(0.8f),
-            horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
-        ) {
-            Text(
-                shown,
-                Modifier
-                    .clip(shape)
-                    .background(
-                        when {
-                            failed -> MaterialTheme.colorScheme.errorContainer
-                            outgoing -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                    )
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                fontSize = 16.sp,
-                color = textColour,
-                fontStyle = if (hidden) FontStyle.Italic else FontStyle.Normal,
+        }
+    }
+}
+
+/**
+ * Places a popup just above its anchor, lined up with the anchor's start or end edge and
+ * kept inside the window; below the anchor when there is no room above.
+ */
+private class FloatAbove(private val alignEnd: Boolean, private val gap: Int) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val end = if (layoutDirection == LayoutDirection.Ltr) alignEnd else !alignEnd
+        val x = if (end) anchorBounds.right - popupContentSize.width else anchorBounds.left
+        val above = anchorBounds.top - popupContentSize.height - gap
+        val y = if (above >= 0) above else anchorBounds.bottom + gap
+        return IntOffset(x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)), y)
+    }
+}
+
+/**
+ * The reactions on a message, on the bubble's lower edge. Ringed in the background colour
+ * so it reads as sitting over the bubble; tinted when one of them is this phone's.
+ */
+@Composable
+private fun ReactionChip(emoji: List<String>, includesMine: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    Text(
+        emoji.joinToString(" "),
+        Modifier
+            .padding(horizontal = 10.dp)
+            // Overlap the bubble above by a few dp, taking that much less room below.
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val overlap = REACTION_OVERLAP.roundToPx()
+                layout(placeable.width, (placeable.height - overlap).coerceAtLeast(0)) { placeable.place(0, -overlap) }
+            }
+            .border(2.dp, colors.background, shape)
+            .clip(shape)
+            .background(if (includesMine) colors.secondaryContainer else colors.surfaceContainerHighest)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        fontSize = 14.sp,
+    )
+}
+
+private val REACTION_OVERLAP = 6.dp
+
+/** Select all, and lock or unlock, for the selected messages. */
+@Composable
+private fun SelectionMenu(allLocked: Boolean, onSelectAll: () -> Unit, onLockChange: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(40.dp)) {
+            Icon(
+                painterResource(R.drawable.ic_more),
+                contentDescription = stringResource(R.string.more_options),
+                tint = MaterialTheme.colorScheme.onSurface,
             )
         }
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            // Locked messages carry a small lock by their time, shown or hidden.
-            if (locked) {
-                Icon(
-                    painterResource(R.drawable.ic_lock),
-                    contentDescription = null,
-                    modifier = Modifier.size(11.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(3.dp))
-            }
-            Text(
-                listOfNotNull(time, simLabel, state).joinToString(" · "),
-                fontSize = 11.sp,
-                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.select_all)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_select_all), null) },
+                onClick = {
+                    open = false
+                    onSelectAll()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(if (allLocked) R.string.unlock else R.string.lock)) },
+                leadingIcon = { Icon(painterResource(if (allLocked) R.drawable.ic_lock_open else R.drawable.ic_lock), null) },
+                onClick = {
+                    open = false
+                    onLockChange()
+                },
             )
         }
     }

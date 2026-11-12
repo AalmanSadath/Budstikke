@@ -2,6 +2,7 @@ package dev.aalman.budstikke.sms
 
 import android.content.BroadcastReceiver
 import android.content.ContentValues
+import dev.aalman.budstikke.data.Locks
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
@@ -62,6 +63,7 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         // The provider assigns the thread from the address.
         val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values) ?: return
         if (blocked) return
+        Locks.get(context).coverReaction(uri, sms.body)
         val threadId = context.contentResolver.query(uri, arrayOf(Telephony.Sms.THREAD_ID), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null } ?: return
         MessageNotifier(context).update(threadId)

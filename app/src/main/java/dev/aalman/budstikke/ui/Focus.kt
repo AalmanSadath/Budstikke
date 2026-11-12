@@ -28,3 +28,26 @@ fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier = pointerInpu
         }
     }
 }
+
+/**
+ * Calls [onTap] when this area is tapped while [enabled]: a short touch that does not
+ * move. A drag and a long press do not count. Like [clearFocusOnTap] it watches touches
+ * before the area's children and consumes nothing, so they still respond.
+ */
+fun Modifier.onTapAnywhere(enabled: Boolean, onTap: () -> Unit): Modifier = pointerInput(enabled, onTap) {
+    if (!enabled) return@pointerInput
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var moved = false
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+            if (!change.pressed) {
+                val short = change.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+                if (!moved && short) onTap()
+                break
+            }
+        }
+    }
+}

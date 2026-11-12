@@ -1,6 +1,13 @@
 package dev.aalman.budstikke
 
 import kotlinx.coroutines.flow.combine
+import dev.aalman.budstikke.data.Marks
+import dev.aalman.budstikke.data.MarkState
+import dev.aalman.budstikke.data.StarredMessage
+import dev.aalman.budstikke.data.Message
+import dev.aalman.budstikke.sms.canSendReactionTo
+import dev.aalman.budstikke.sms.reactionText
+import dev.aalman.budstikke.ui.StarredScreen
 import dev.aalman.budstikke.data.Locks
 import dev.aalman.budstikke.data.LockState
 import androidx.activity.compose.LocalActivity
@@ -122,6 +129,7 @@ class MainActivity : ComponentActivity() {
     private var showBlocked by mutableStateOf(false)
     private var showScheduled by mutableStateOf(false)
     private var showSearch by mutableStateOf(false)
+    private var showStarred by mutableStateOf(false)
     // Kept here rather than in the search screen, which leaves composition while a
     // conversation opened from it is showing; back from there finds the same search.
     private var searchQuery by mutableStateOf("")
@@ -151,6 +159,7 @@ class MainActivity : ComponentActivity() {
         showBlocked = savedInstanceState?.getBoolean(STATE_BLOCKED) ?: false
         showScheduled = savedInstanceState?.getBoolean(STATE_SCHEDULED) ?: false
         showSearch = savedInstanceState?.getBoolean(STATE_SEARCH) ?: false
+        showStarred = savedInstanceState?.getBoolean(STATE_STARRED) ?: false
         searchQuery = savedInstanceState?.getString(STATE_SEARCH_QUERY).orEmpty()
 
         val conversations = ConversationRepository(this)
@@ -193,6 +202,13 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onBack = closeSearch,
+                        )
+                    }
+                    showStarred -> {
+                        BackHandler { showStarred = false }
+                        StarredRoute(
+                            onOpen = { openThread = OpenThread(it.threadId, it.address, focusMessageId = it.id) },
+                            onBack = { showStarred = false },
                         )
                     }
                     showBlocked -> {
@@ -245,6 +261,7 @@ class MainActivity : ComponentActivity() {
                         onShowTrash = { showTrash = true },
                         onSettings = { showSettings = true },
                         onSearch = { showSearch = true },
+                        onShowStarred = { showStarred = true },
                     )
                 }
                     SnackbarHost(
@@ -281,6 +298,7 @@ class MainActivity : ComponentActivity() {
         outState.putBoolean(STATE_BLOCKED, showBlocked)
         outState.putBoolean(STATE_SCHEDULED, showScheduled)
         outState.putBoolean(STATE_SEARCH, showSearch)
+        outState.putBoolean(STATE_STARRED, showStarred)
         outState.putString(STATE_SEARCH_QUERY, searchQuery)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
@@ -326,6 +344,7 @@ class MainActivity : ComponentActivity() {
         private const val STATE_BLOCKED = "blocked"
         private const val STATE_SCHEDULED = "scheduled"
         private const val STATE_SEARCH = "search"
+        private const val STATE_STARRED = "starred"
         private const val STATE_SEARCH_QUERY = "search_query"
 
         /** Opens one conversation, reusing the activity if it is already running. */
@@ -397,6 +416,10 @@ private fun ConversationRoute(
     val lockStore = remember { Locks.get(context) }
     val lockState by produceState(LockState()) {
         lockStore.changes().collect { value = withContext(Dispatchers.IO) { lockStore.state() } }
+    }
+    val markStore = remember { Marks.get(context) }
+    val markState by produceState(MarkState()) {
+        markStore.changes().collect { value = withContext(Dispatchers.IO) { markStore.state() } }
     }
     val unlocked by LockSession.unlocked.collectAsState()
     val activity = LocalActivity.current
@@ -513,6 +536,33 @@ private fun ConversationRoute(
                 }
             }
         },
+        marks = markState,
+        onReact = { message, emoji ->
+            // The same emoji again takes it off. A full phone number is told by SMS, held
+            // back by the send delay like any other message.
+            val removing = markState.reactions[message.id] == emoji
+            val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
+            scope.launch(Dispatchers.IO) {
+                markStore.setReaction(message.id, if (removing) null else emoji)
+                if (canSendReactionTo(thread.address)) {
+                    val body = reactionText(emoji, message.body, removed = removing)
+                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
+                }
+            }
+        },
+        onStar = { ids, starred -> scope.launch(Dispatchers.IO) { markStore.setStarred(ids, starred) } },
+        onCopy = { chosen ->
+            copyMessages(context, chosen)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                scope.launch {
+                    undo.snackbar.currentSnackbarData?.dismiss()
+                    undo.snackbar.showSnackbar(resources.getString(R.string.copied))
+                }
+            }
+        },
+        onForward = { message ->
+            context.startActivity(Intent(context, ComposeActivity::class.java).putExtra(Intent.EXTRA_TEXT, message.body))
+        },
         focusMessageId = thread.focusMessageId,
         highlight = thread.highlight,
         contact = contact,
@@ -615,6 +665,7 @@ private fun ConversationListRoute(
     onShowTrash: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
+    onShowStarred: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -661,6 +712,7 @@ private fun ConversationListRoute(
         onShowTrash = onShowTrash,
         onSettings = onSettings,
         onSearch = onSearch,
+        onShowStarred = onShowStarred,
     )
 }
 
@@ -811,6 +863,28 @@ private fun ScheduledRoute(undo: UndoQueue, onOpen: (PendingMessage) -> Unit, on
 }
 
 @Composable
+private fun StarredRoute(onOpen: (StarredMessage) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val marks = remember { Marks.get(context) }
+    val flow = remember { marks.starredMessages() }
+    val entries by flow.collectAsStateWithLifecycle(initialValue = null)
+    val lockStore = remember { Locks.get(context) }
+    val lockState by produceState(LockState()) {
+        lockStore.changes().collect { value = withContext(Dispatchers.IO) { lockStore.state() } }
+    }
+    val unlocked by LockSession.unlocked.collectAsState()
+    StarredScreen(
+        entries = entries,
+        locks = lockState,
+        unlocked = unlocked,
+        onOpen = onOpen,
+        onUnstar = { entry -> scope.launch(Dispatchers.IO) { marks.setStarred(listOf(entry.id), false) } },
+        onBack = onBack,
+    )
+}
+
+@Composable
 private fun TrashRoute(undo: UndoQueue, onBack: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -871,4 +945,11 @@ private fun copyCode(context: Context, code: String) {
         clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
     }
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+}
+
+/** Puts the text of [messages], oldest first, on the clipboard, one message per line. */
+private fun copyMessages(context: Context, messages: List<Message>) {
+    val text = messages.sortedBy { it.dateMillis }.joinToString("\n") { it.body }
+    context.getSystemService(ClipboardManager::class.java)
+        .setPrimaryClip(ClipData.newPlainText(context.getString(R.string.copy), text))
 }

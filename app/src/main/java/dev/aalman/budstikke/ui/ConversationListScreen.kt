@@ -73,6 +73,7 @@ fun ConversationListScreen(
     onNewMessage: (() -> Unit)? = null,
     onShowArchive: (() -> Unit)? = null,
     onShowTrash: (() -> Unit)? = null,
+    onShowStarred: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
 ) {
@@ -130,6 +131,7 @@ fun ConversationListScreen(
             TopBar(stringResource(if (archive) R.string.archived else R.string.app_name), onBack = onBack) {
                 // Leftmost, so the buttons selecting puts in their places line up as before.
                 onSearch?.let { BarAction(R.drawable.ic_search, R.string.search, it) }
+                onShowStarred?.let { BarAction(R.drawable.ic_star_outline, R.string.starred, it) }
                 onShowArchive?.let { BarAction(R.drawable.ic_archive, R.string.archived, it) }
                 onShowTrash?.let { BarAction(R.drawable.ic_delete, R.string.trash, it) }
                 onSettings?.let { BarAction(R.drawable.ic_settings, R.string.settings, it) }

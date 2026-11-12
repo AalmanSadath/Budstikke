@@ -3,9 +3,13 @@ package dev.aalman.budstikke.data
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.net.Uri
+import android.provider.Telephony
 import androidx.core.database.sqlite.transaction
 import dev.aalman.budstikke.data.AppDatabase.Companion.LOCK_MESSAGE
 import dev.aalman.budstikke.data.AppDatabase.Companion.LOCK_THREAD
+import dev.aalman.budstikke.sms.parseReaction
+import dev.aalman.budstikke.sms.quotes
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -24,6 +28,7 @@ data class LockState(val threads: Set<Long> = emptySet(), val messages: Set<Long
 class Locks private constructor(context: Context) {
 
     private val db = AppDatabase.get(context)
+    private val resolver = context.applicationContext.contentResolver
     private val version = MutableStateFlow(0)
 
     /** Emits at once, then after every change. */
@@ -52,6 +57,37 @@ class Locks private constructor(context: Context) {
     fun forgetThreadsBut(threadIds: Set<Long>) {
         val stale = state().threads - threadIds
         if (stale.isNotEmpty()) set(LOCK_THREAD, stale, false)
+    }
+
+    /**
+     * Locks a reaction text just written to the store at [uri] when it quotes a locked
+     * message of its conversation, so the quote does not show the locked text in the list,
+     * a notification or search. Run it before notifying.
+     */
+    fun coverReaction(uri: Uri, body: String) {
+        val reaction = parseReaction(body) ?: return
+        val state = state()
+        if (state.messages.isEmpty() && state.threads.isEmpty()) return
+        val row = resolver.query(uri, arrayOf(Telephony.Sms._ID, Telephony.Sms.THREAD_ID), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null } ?: return
+        val (id, threadId) = row
+        // A locked conversation hides everything in it already.
+        if (threadId in state.threads || state.messages.isEmpty()) return
+        val locked = state.messages.toList()
+        val quotesLocked = locked.chunked(500).any { chunk ->
+            resolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.BODY),
+                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms._ID} IN (${chunk.joinToString(",") { "?" }})",
+                arrayOf(threadId.toString()) + chunk.map { it.toString() },
+                null,
+            )?.use { c ->
+                var match = false
+                while (!match && c.moveToNext()) match = quotes(reaction.quote, c.getString(0).orEmpty())
+                match
+            } ?: false
+        }
+        if (quotesLocked) setMessagesLocked(listOf(id), true)
     }
 
     private fun set(kind: Int, ids: Collection<Long>, locked: Boolean) {
