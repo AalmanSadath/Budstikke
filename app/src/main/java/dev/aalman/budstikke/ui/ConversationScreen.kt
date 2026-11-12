@@ -85,6 +85,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -139,6 +144,8 @@ fun ConversationScreen(
     // rather than as messages of their own.
     val folded = remember(messages) { foldReactions(messages) }
     val shown = folded.shown
+    val places = remember(shown) { bubblePlaces(shown).let { list -> shown.indices.associate { shown[it].id to list[it] } } }
+    val reducedMotion = rememberReducedMotion()
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
     var selected by rememberSaveable(address, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
     LaunchedEffect(shown) {
@@ -284,43 +291,47 @@ fun ConversationScreen(
             state = listState,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // Messages still waiting to go out sit below the sent ones, soonest nearest them.
             items(pending.asReversed(), key = { "pending:${it.id}" }) { message ->
-                PendingBubble(message, onPendingAction)
+                Box(Modifier.motion(this, reducedMotion).padding(top = GROUP_SPACING)) { PendingBubble(message, onPendingAction) }
             }
             items(shown.asReversed(), key = { it.id }) { message ->
-                val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
-                Bubble(
-                    message,
-                    simLabel = sims.labelFor(message),
-                    isSelected = message.id in selected,
-                    flash = message.id == flashId,
-                    highlight = highlight,
-                    locked = message.id in locks.messages,
-                    hidden = message.id in locks.messages && !unlocked,
-                    starred = message.id in marks.starred,
-                    mine = marks.reactions[message.id],
-                    theirs = folded.theirs[message.id],
-                    // One message held down offers the emoji; a locked one only once it shows.
-                    reactionBar = barFor == message.id,
-                    onReact = { emoji ->
-                        selected = emptySet()
-                        onReact(message, emoji)
-                    },
-                    // While selecting, a tap on the code selects like a tap anywhere else.
-                    onCopyCode = if (selecting) null else onCopyCode,
-                    onClick = {
-                        when {
-                            barFor != null -> selected = emptySet()
-                            selecting -> toggle()
-                            message.id in locks.messages && !unlocked -> onUnlock {}
-                            message.state == MessageState.Failed -> onRetry(message)
-                        }
-                    },
-                    onLongClick = toggle,
-                )
+                val place = places[message.id] ?: BubblePlace(timeLabel = false, joinedAbove = false, joinedBelow = false)
+                Column(Modifier.motion(this, reducedMotion).padding(top = if (place.joinedAbove) JOINED_SPACING else GROUP_SPACING)) {
+                    if (place.timeLabel) TimeLabel(message.dateMillis)
+                    val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
+                    Bubble(
+                        message,
+                        simLabel = sims.labelFor(message),
+                        isSelected = message.id in selected,
+                        flash = message.id == flashId,
+                        highlight = highlight,
+                        locked = message.id in locks.messages,
+                        hidden = message.id in locks.messages && !unlocked,
+                        starred = message.id in marks.starred,
+                        mine = marks.reactions[message.id],
+                        theirs = folded.theirs[message.id],
+                        // One message held down offers the emoji; a locked one only once it shows.
+                        reactionBar = barFor == message.id,
+                        onReact = { emoji ->
+                            selected = emptySet()
+                            onReact(message, emoji)
+                        },
+                        // While selecting, a tap on the code selects like a tap anywhere else.
+                        onCopyCode = if (selecting) null else onCopyCode,
+                        onClick = {
+                            when {
+                                barFor != null -> selected = emptySet()
+                                selecting -> toggle()
+                                message.id in locks.messages && !unlocked -> onUnlock {}
+                                message.state == MessageState.Failed -> onRetry(message)
+                            }
+                        },
+                        onLongClick = toggle,
+                        place = place,
+                    )
+                }
             }
         }
         ComposeBar(
@@ -467,6 +478,7 @@ private fun Bubble(
     onCopyCode: ((String) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    place: BubblePlace,
 ) {
     val context = LocalContext.current
     val outgoing = message.isOutgoing
@@ -551,9 +563,12 @@ private fun Bubble(
                 .padding(2.dp),
             horizontalAlignment = align,
         ) {
+            // Bubbles of one group share their inner side: the corners where they meet are tight,
+            // and the last keeps the small corner that points at who sent it.
+            val joinedTop = if (place.joinedAbove) 4.dp else 18.dp
             val shape = RoundedCornerShape(
-                topStart = 18.dp,
-                topEnd = 18.dp,
+                topStart = if (outgoing) 18.dp else joinedTop,
+                topEnd = if (outgoing) joinedTop else 18.dp,
                 bottomStart = if (outgoing) 18.dp else 4.dp,
                 bottomEnd = if (outgoing) 4.dp else 18.dp,
             )
@@ -580,7 +595,9 @@ private fun Bubble(
                 )
                 if (mine != null || theirs != null) ReactionChip(listOfNotNull(theirs, mine).distinct(), mine != null)
             }
-            Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Inside a group only the last message names the time and state, unless one needs
+            // its own: it failed, or carries a star or a lock.
+            if (!place.joinedBelow || failed || starred || locked) Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (starred) {
                     Icon(
                         painterResource(R.drawable.ic_star),
@@ -694,6 +711,42 @@ private fun ReactionChip(emoji: List<String>, includesMine: Boolean) {
 }
 
 private val REACTION_OVERLAP = 6.dp
+
+/** Space above a message that starts a group, and above one that joins the message before. */
+private val GROUP_SPACING = 10.dp
+private val JOINED_SPACING = 1.dp
+
+/**
+ * A message arriving, going out or leaving fades in or out while the rest slide to make
+ * room, unless motion is turned down; then it appears and goes at once.
+ */
+private fun Modifier.motion(item: LazyItemScope, reduced: Boolean): Modifier =
+    if (reduced) {
+        this
+    } else {
+        with(item) {
+            animateItem(
+                fadeInSpec = tween(MOTION_MILLIS),
+                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold),
+                fadeOutSpec = tween(MOTION_MILLIS / 2),
+            )
+        }
+    }
+
+private const val MOTION_MILLIS = 250
+
+/** Above a group that starts the conversation or follows a long pause: when it began. */
+@Composable
+private fun TimeLabel(millis: Long) {
+    val time = messageTime(LocalContext.current, millis)
+    Text(
+        time,
+        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
 
 /** Select all, and lock or unlock, for the selected messages. */
 @Composable
