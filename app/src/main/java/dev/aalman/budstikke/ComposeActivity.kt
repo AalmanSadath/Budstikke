@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.ContactMatch
 import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.data.Outgoing
+import dev.aalman.budstikke.ui.SchedulePicker
 import dev.aalman.budstikke.sms.looksLikeNumber
 import dev.aalman.budstikke.sms.typedRecipient
 import dev.aalman.budstikke.sms.withRecipient
@@ -123,6 +125,21 @@ class ComposeActivity : ComponentActivity() {
                 val settings by SettingsRepository.get(this).settings.collectAsState()
                 val sim = sims.firstOrNull { it.subscriptionId == chosen }
                     ?: preferredSim(sims, settings.defaultSubscriptionId)
+                var scheduling by rememberSaveable { mutableStateOf(false) }
+                val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
+                // The recipients when there is something to send to them, or null. A name typed
+                // but not picked has no number to send to, and says so under the field.
+                val sendable = {
+                    val recipients = parseRecipients(to.text)
+                    when {
+                        recipients.any { !looksLikeNumber(it) } -> {
+                            notNumber = true
+                            null
+                        }
+                        recipients.isEmpty() || body.isBlank() -> null
+                        else -> recipients
+                    }
+                }
 
                 Column(
                     Modifier
@@ -189,17 +206,23 @@ class ComposeActivity : ComponentActivity() {
                         sim = sim,
                         onSimChange = { chosen = it.subscriptionId },
                         onSend = {
-                            val recipients = parseRecipients(to.text)
-                            val text = body.trim()
-                            // A name typed but not picked has no number to send to.
-                            if (recipients.any { !looksLikeNumber(it) }) {
-                                notNumber = true
-                            } else if (recipients.isNotEmpty() && text.isNotEmpty()) {
-                                send(recipients, text, sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID)
-                            }
+                            val recipients = sendable()
+                            if (recipients != null) send(recipients, body.trim(), subscription)
                         },
                         modifier = Modifier.navigationBarsPadding(),
+                        onSchedule = { if (sendable() != null) scheduling = true },
                     )
+                    if (scheduling) {
+                        SchedulePicker(
+                            initialMillis = null,
+                            onDismiss = { scheduling = false },
+                            onPick = { millis ->
+                                scheduling = false
+                                val recipients = sendable()
+                                if (recipients != null) send(recipients, body.trim(), subscription, at = millis)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -210,14 +233,20 @@ class ComposeActivity : ComponentActivity() {
         const val SUGGEST_DELAY_MILLIS = 100L
     }
 
-    private fun send(recipients: List<String>, text: String, subscriptionId: Int) {
+    /** Sends [text] to each recipient now, or schedules it for [at] when that is given. */
+    private fun send(recipients: List<String>, text: String, subscriptionId: Int, at: Long? = null) {
         lifecycleScope.launch {
             val thread = withContext(Dispatchers.IO) {
                 // Each recipient gets their own conversation, which shows the send delay's
-                // countdown when one is set.
+                // countdown or the scheduled message.
+                val outgoing = Outgoing.get(this@ComposeActivity)
                 recipients.forEach { recipient ->
                     val thread = Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, recipient)
-                    OutgoingQueue.sendOrHold(this@ComposeActivity, thread, recipient, text, subscriptionId)
+                    if (at == null) {
+                        OutgoingQueue.sendOrHold(this@ComposeActivity, thread, recipient, text, subscriptionId)
+                    } else {
+                        outgoing.add(thread, recipient, text, subscriptionId, at, delayed = false)
+                    }
                 }
                 recipients.singleOrNull()?.let { Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, it) }
             }
