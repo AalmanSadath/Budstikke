@@ -78,16 +78,16 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R7. Backup and restore, PIN-encrypted
 
-- [ ] Settings offers "Backup messages". It asks for a PIN, then opens the system file picker
+- [x] Settings offers "Backup messages". It asks for a PIN, then opens the system file picker
       to choose where to save; an SD card and a cloud provider's folder can be chosen if the
       phone offers them.
-- [ ] The saved backup file cannot be read as text, and restoring it with the wrong PIN fails
+- [x] The saved backup file cannot be read as text, and restoring it with the wrong PIN fails
       with a clear message and changes nothing.
-- [ ] Restoring with the right PIN, on the same or another phone with Budstikke as default
+- [x] Restoring with the right PIN, on the same or another phone with Budstikke as default
       app, brings back every SMS conversation and message with original dates, and the app's
       own data (pins, archive, blocks, drafts, scheduled messages, reactions, locks).
-- [ ] Restoring twice does not duplicate messages.
-- [ ] Progress is shown during backup and restore.
+- [x] Restoring twice does not duplicate messages.
+- [x] Progress is shown during backup and restore.
 
 ## R8. Pin conversations
 

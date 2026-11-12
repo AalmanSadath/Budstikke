@@ -161,12 +161,15 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))
             LinkRow(stringResource(R.string.blocked_title), stringResource(R.string.settings_blocked_hint), onShowBlocked)
+
+            Spacer(Modifier.height(28.dp))
+            BackupSection()
         }
     }
 }
 
 @Composable
-private fun SectionHeading(text: String) {
+internal fun SectionHeading(text: String) {
     Text(
         text,
         Modifier.padding(bottom = 10.dp),
@@ -281,7 +284,7 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
 
 /** A row that opens another page. */
 @Composable
-private fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
+internal fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
