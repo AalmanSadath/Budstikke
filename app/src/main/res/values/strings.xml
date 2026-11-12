@@ -165,4 +165,17 @@
     <string name="settings_send_delay_hint">A sent message waits this long first, with a countdown and Cancel, so a mistake can be caught. Replies from a notification go at once.</string>
     <string name="seconds_short">%1$d s</string>
     <string name="sending_in">Sending in %1$d s</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied</string>
+    <string name="forward">Forward</string>
+    <string name="star">Star</string>
+    <string name="unstar">Unstar</string>
+    <string name="starred">Starred</string>
+    <string name="starred_empty">No starred messages. Long-press a message and tap the star to keep it here.</string>
+    <string name="you">You</string>
+    <string name="react_with">React with %1$s</string>
+    <string name="remove_reaction">Remove %1$s</string>
+    <string name="reactions_label">Reactions</string>
+    <string name="reaction_yours">you %1$s</string>
+    <string name="reaction_theirs">them %1$s</string>
 </resources>

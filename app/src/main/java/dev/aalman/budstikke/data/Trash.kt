@@ -43,6 +43,7 @@ class Trash private constructor(context: Context) {
     private val flags = ConversationFlags.get(context)
     private val contacts = ContactRepository.get(context)
     private val locks = Locks.get(context)
+    private val marks = Marks.get(context)
     private val version = MutableStateFlow(0)
 
     /** The trash, newest deletion first, reloaded after every change. */
@@ -54,11 +55,12 @@ class Trash private constructor(context: Context) {
     fun deleteConversations(threads: Map<Long, String>): List<Long> {
         val before = flags.all()
         val lockState = locks.state()
+        val markState = marks.state()
         val ids = threads.mapNotNull { (threadId, address) ->
             val f = before[threadId] ?: Flags()
             move(
                 address, "${Telephony.Sms.THREAD_ID} = ?", arrayOf(threadId.toString()), true, f,
-                threadLocked = threadId in lockState.threads, lockedMessages = lockState.messages,
+                threadLocked = threadId in lockState.threads, lockedMessages = lockState.messages, marks = markState,
             )?.also { locks.setThreadLocked(threadId, false) }
         }
         version.update { it + 1 }
@@ -76,6 +78,7 @@ class Trash private constructor(context: Context) {
             Flags(),
             threadLocked = false,
             lockedMessages = locks.state().messages,
+            marks = marks.state(),
         )
         version.update { it + 1 }
         return id
@@ -96,11 +99,13 @@ class Trash private constructor(context: Context) {
                 else Triple(c.getInt(0) != 0, if (c.isNull(1)) null else c.getLong(1), c.getInt(2) != 0) to (c.getInt(3) != 0)
             } ?: continue
             var threadId: Long? = null
-            // Restored rows get new ids, so their locks are set again on those.
+            // Restored rows get new ids, so their locks, stars and reactions are set again on those.
             val relock = ArrayList<Long>()
+            val restar = ArrayList<Long>()
+            val react = HashMap<Long, String>()
             sql.query(
                 "trash_messages",
-                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id", "locked"),
+                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id", "locked", "starred", "reaction"),
                 "item_id = ?", arrayOf(itemId.toString()), null, null, "date ASC",
             ).use { c ->
                 while (c.moveToNext()) {
@@ -116,7 +121,12 @@ class Trash private constructor(context: Context) {
                         put(Telephony.Sms.SUBSCRIPTION_ID, c.getInt(8))
                     }
                     val uri = resolver.insert(Telephony.Sms.CONTENT_URI, values) ?: continue
-                    if (c.getInt(9) != 0) uri.lastPathSegment?.toLongOrNull()?.let(relock::add)
+                    val newId = uri.lastPathSegment?.toLongOrNull()
+                    if (newId != null) {
+                        if (c.getInt(9) != 0) relock += newId
+                        if (c.getInt(10) != 0) restar += newId
+                        if (!c.isNull(11)) react[newId] = c.getString(11)
+                    }
                     if (threadId == null) {
                         threadId = resolver.query(uri, arrayOf(Telephony.Sms.THREAD_ID), null, null, null)
                             ?.use { t -> if (t.moveToFirst()) t.getLong(0) else null }
@@ -131,6 +141,8 @@ class Trash private constructor(context: Context) {
             }
             if (threadLocked && restoredThread != null) locks.setThreadLocked(restoredThread, true)
             locks.setMessagesLocked(relock, true)
+            marks.setStarred(restar, true)
+            react.forEach { (id, emoji) -> marks.setReaction(id, emoji) }
             sql.delete("trash_items", "id = ?", arrayOf(itemId.toString()))
         }
         version.update { it + 1 }
@@ -167,6 +179,7 @@ class Trash private constructor(context: Context) {
         flags: Flags,
         threadLocked: Boolean,
         lockedMessages: Set<Long>,
+        marks: MarkState,
     ): Long? {
         val sql = db.writableDatabase
         val copied = ArrayList<Long>()
@@ -205,6 +218,8 @@ class Trash private constructor(context: Context) {
                         put("status", c.getInt(8))
                         put("sub_id", c.getInt(9))
                         put("locked", if (id in lockedMessages) 1 else 0)
+                        put("starred", if (id in marks.starred) 1 else 0)
+                        put("reaction", marks.reactions[id])
                     })
                 }
             }
@@ -213,9 +228,10 @@ class Trash private constructor(context: Context) {
         } finally {
             sql.endTransaction()
         }
-        // The copies, with their locks, are committed before anything leaves the system store;
-        // the locks on the old ids go with them.
+        // The copies, with their locks and marks, are committed before anything leaves the
+        // system store; the locks and marks on the old ids go with them.
         locks.setMessagesLocked(copied.filter { it in lockedMessages }, false)
+        this.marks.forget(copied.filter { it in marks.starred || it in marks.reactions })
         copied.chunked(500).forEach { chunk ->
             resolver.delete(
                 Telephony.Sms.CONTENT_URI,

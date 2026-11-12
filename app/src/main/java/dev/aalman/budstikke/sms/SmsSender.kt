@@ -3,6 +3,7 @@ package dev.aalman.budstikke.sms
 import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.ContentValues
+import dev.aalman.budstikke.data.Locks
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -40,6 +41,7 @@ class SmsSender(context: Context) {
             }
         }
         val uri = resolver.insert(Telephony.Sms.Outbox.CONTENT_URI, values) ?: return null
+        Locks.get(context).coverReaction(uri, body)
         dispatch(uri, address, body, subscriptionId)
         return uri
     }

@@ -69,11 +69,11 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R6. Animated message bubbles
 
-- [ ] Sent messages sit on the right and received ones on the left, in visibly different
+- [x] Sent messages sit on the right and received ones on the left, in visibly different
       bubble colours.
-- [ ] Consecutive messages from the same side group together, with a time label between groups
+- [x] Consecutive messages from the same side group together, with a time label between groups
       that are far apart in time.
-- [ ] A newly sent or received message animates into place rather than appearing at once.
+- [x] A newly sent or received message animates into place rather than appearing at once.
 - [ ] With reduced motion on (R20), the same message appears without animation.
 
 ## R7. Backup and restore, PIN-encrypted
@@ -178,12 +178,14 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R19. Reactions
 
-- [ ] Long-pressing a message selects it and shows a bar of eight emoji (👍 😂 ❤️ 🔥 😢 😮 🙏 🎉)
+- [x] Long-pressing a message selects it and shows a bar of eight emoji (👍 😂 ❤️ 🔥 😢 😮 🙏 🎉)
       above it, with copy, forward, star and delete actions in the top bar.
-- [ ] Tapping an emoji attaches it to the message, shown on the bubble's edge; tapping the same
+- [x] Tapping an emoji attaches it to the message, shown on the bubble's edge; tapping the same
       emoji again removes it.
-- [ ] Open question: whether a reaction is also sent to the other person as an SMS, or kept
-      only on this phone. an1ndra's screenshots do not show it. Decide in the prototype.
+- [x] A reaction is kept on this phone and also sent to the other person as an SMS, in the
+      wording Google Messages uses (`Reacted 👍 to "…"`, `Removed 👍 from "…"`), but only to a
+      full phone number. Reactions arriving as such texts, or as iPhone tapbacks, show on the
+      message they quote.
 
 ## R20. Accessibility mode
 

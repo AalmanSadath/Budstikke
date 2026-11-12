@@ -27,6 +27,7 @@ class AppDatabase private constructor(context: Context) :
         createDrafts(db)
         createOutgoing(db)
         createLocks(db)
+        createMarks(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -39,6 +40,26 @@ class AppDatabase private constructor(context: Context) :
             // A trash made before version 2 above already has these columns.
             if (oldVersion >= 2) addTrashLocks(db)
         }
+        if (oldVersion < 7) {
+            createMarks(db)
+            if (oldVersion >= 2) addTrashMarks(db)
+        }
+    }
+
+    /**
+     * What this phone has put on single messages, by SMS id: its own reaction, one emoji per
+     * message, and stars. The other person's reactions arrive as texts and are read from
+     * the system store instead.
+     */
+    private fun createMarks(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE reactions (message_id INTEGER PRIMARY KEY, emoji TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE starred (message_id INTEGER PRIMARY KEY, starred_at INTEGER NOT NULL)")
+    }
+
+    /** Keeps a deleted message's star and reaction with it in the trash. */
+    private fun addTrashMarks(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE trash_messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE trash_messages ADD COLUMN reaction TEXT")
     }
 
     /**
@@ -118,7 +139,9 @@ class AppDatabase private constructor(context: Context) :
                 seen INTEGER NOT NULL,
                 status INTEGER NOT NULL,
                 sub_id INTEGER NOT NULL,
-                locked INTEGER NOT NULL DEFAULT 0
+                locked INTEGER NOT NULL DEFAULT 0,
+                starred INTEGER NOT NULL DEFAULT 0,
+                reaction TEXT
             )
             """.trimIndent(),
         )
@@ -133,7 +156,7 @@ class AppDatabase private constructor(context: Context) :
         private const val NAME = "budstikke.db"
         const val LOCK_THREAD = 0
         const val LOCK_MESSAGE = 1
-        private const val VERSION = 6
+        private const val VERSION = 7
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")
