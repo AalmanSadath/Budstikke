@@ -202,12 +202,12 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 
 ## R21. Message import
 
-- [ ] Settings has "Import messages". It offers three sources: a Budstikke backup (R7), an
+- [x] Settings has "Import messages". It offers three sources: a Budstikke backup (R7), an
       "SMS Import / Export" backup (`.zip` or `.json`), and a QKSMS backup.
-- [ ] After choosing a source and a file through the file picker, imported messages appear in
+- [x] After choosing a source and a file through the file picker, imported messages appear in
       their conversations with original dates and sent or received direction.
-- [ ] Progress is shown, and importing the same file twice does not duplicate messages.
-- [ ] MMS entries in an imported file are skipped, and the result says how many were skipped.
+- [x] Progress is shown, and importing the same file twice does not duplicate messages.
+- [x] MMS entries in an imported file are skipped, and the result says how many were skipped.
 
 ## R22. Colours and themes
 

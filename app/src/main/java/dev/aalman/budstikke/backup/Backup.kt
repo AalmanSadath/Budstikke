@@ -29,6 +29,9 @@ data class RestoreResult(
     val scheduledPast: Int,
 )
 
+/** What an import did. */
+data class ImportResult(val added: Int, val alreadyHere: Int, val mmsSkipped: Int, val unreadable: Int)
+
 /**
  * Writes this phone's messages and the app's own data to a PIN-sealed file, and reads them
  * back. Files are reached through the system file picker's URIs, so they can sit on an SD
@@ -59,6 +62,14 @@ class Backup(context: Context) {
         val sealed = resolver.openInputStream(uri)?.use { it.readBytes() } ?: throw java.io.IOException("No input stream")
         val content = BackupFormat.read(BackupCrypto.open(sealed, pin))
         return apply(content, progress)
+    }
+
+    /** Adds the SMS in another app's backup at [uri]; its MMS are counted and left out. */
+    fun import(uri: Uri, source: ImportSource, progress: Progress): ImportResult {
+        progress(0, 0)
+        val parsed = resolver.openInputStream(uri)?.use { Importers.parse(source, it) } ?: throw java.io.IOException("No input stream")
+        val (inserted, _) = insertMessages(parsed.messages, progress)
+        return ImportResult(inserted.added, inserted.alreadyHere, parsed.mms, parsed.unreadable)
     }
 
     private fun collect(progress: Progress): BackupContent {

@@ -16,12 +16,13 @@ sealed interface JobState {
     data class Running(val kind: JobKind, val done: Int, val total: Int) : JobState
     data class BackedUp(val messages: Int) : JobState
     data class Restored(val result: RestoreResult) : JobState
+    data class Imported(val result: ImportResult) : JobState
     data class Failed(val kind: JobKind, val reason: FailReason) : JobState
 }
 
-enum class JobKind { Backup, Restore }
+enum class JobKind { Backup, Restore, Import }
 
-enum class FailReason { WrongPin, NotABackup, File }
+enum class FailReason { WrongPin, NotABackup, TooLarge, File }
 
 /**
  * Runs backups and restores for the life of the process rather than of a screen, so turning
@@ -42,6 +43,10 @@ object BackupJobs {
         JobState.Restored(Backup(context).restore(uri, pin, progress))
     }
 
+    fun import(context: Context, uri: Uri, source: ImportSource) = run(JobKind.Import, CharArray(0)) { progress ->
+        JobState.Imported(Backup(context).import(uri, source, progress))
+    }
+
     /** Clears a finished job's result once it has been shown. */
     fun dismiss() {
         if (_state.value !is JobState.Running) _state.value = JobState.Idle
@@ -57,6 +62,8 @@ object BackupJobs {
                 JobState.Failed(kind, FailReason.WrongPin)
             } catch (_: NotABackupException) {
                 JobState.Failed(kind, FailReason.NotABackup)
+            } catch (_: ImportTooLargeException) {
+                JobState.Failed(kind, FailReason.TooLarge)
             } catch (e: Exception) {
                 Log.e(TAG, "$kind failed", e)
                 JobState.Failed(kind, FailReason.File)

@@ -33,6 +33,7 @@ import dev.aalman.budstikke.R
 import dev.aalman.budstikke.backup.BackupCrypto
 import dev.aalman.budstikke.backup.BackupJobs
 import dev.aalman.budstikke.backup.FailReason
+import dev.aalman.budstikke.backup.ImportSource
 import dev.aalman.budstikke.backup.JobKind
 import dev.aalman.budstikke.backup.JobState
 import java.text.SimpleDateFormat
@@ -74,11 +75,33 @@ fun BackupSection() {
             pinFor = PinFor.Restore
         }
     }
+    var choosingSource by rememberSaveable { mutableStateOf(false) }
+    var importSource by rememberSaveable { mutableStateOf<ImportSource?>(null) }
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val source = importSource
+        importSource = null
+        if (uri != null && source != null) BackupJobs.import(context, uri, source)
+    }
 
     SectionHeading(stringResource(R.string.settings_backup))
     LinkRow(stringResource(R.string.backup_messages), stringResource(R.string.backup_messages_hint)) { pinFor = PinFor.Backup }
     LinkRow(stringResource(R.string.restore_backup), stringResource(R.string.restore_backup_hint)) {
         openFile.launch(arrayOf("*/*"))
+    }
+    LinkRow(stringResource(R.string.import_messages), stringResource(R.string.import_messages_hint)) { choosingSource = true }
+    if (choosingSource) {
+        SourceDialog(
+            onDismiss = { choosingSource = false },
+            onPick = { source ->
+                choosingSource = false
+                if (source == null) {
+                    openFile.launch(arrayOf("*/*"))
+                } else {
+                    importSource = source
+                    openFile(importFile)
+                }
+            },
+        )
     }
 
     when (pinFor) {
@@ -189,6 +212,31 @@ private fun PinDialog(
     )
 }
 
+/** Any file type: other apps' backups come as .zip, .json or .ndjson, often with a vague type. */
+private fun openFile(launcher: androidx.activity.result.ActivityResultLauncher<Array<String>>) = launcher.launch(arrayOf("*/*"))
+
+/** Where to import from. Null stands for a Budstikke backup, which is a restore. */
+@Composable
+private fun SourceDialog(onDismiss: () -> Unit, onPick: (ImportSource?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.import_messages)) },
+        text = {
+            Column {
+                listOf(
+                    null to (R.string.import_source_budstikke to R.string.import_source_budstikke_hint),
+                    ImportSource.SmsImportExport to (R.string.import_source_sms_ie to R.string.import_source_sms_ie_hint),
+                    ImportSource.Qksms to (R.string.import_source_qksms to R.string.import_source_qksms_hint),
+                ).forEach { (source, texts) ->
+                    LinkRow(stringResource(texts.first), stringResource(texts.second)) { onPick(source) }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
 /** Progress while a backup or restore runs, then what came of it. */
 @Composable
 private fun JobDialog() {
@@ -198,7 +246,17 @@ private fun JobDialog() {
         is JobState.Running -> AlertDialog(
             onDismissRequest = {},
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-            title = { Text(stringResource(if (s.kind == JobKind.Backup) R.string.backup_running else R.string.restore_running)) },
+            title = {
+                Text(
+                    stringResource(
+                        when (s.kind) {
+                            JobKind.Backup -> R.string.backup_running
+                            JobKind.Restore -> R.string.restore_running
+                            JobKind.Import -> R.string.import_running
+                        },
+                    ),
+                )
+            },
             text = {
                 Column {
                     if (s.total > 0) {
@@ -226,13 +284,34 @@ private fun JobDialog() {
                     if (past > 0) "\n\n" + pluralStringResource(R.plurals.restore_scheduled_past, past, past) else "",
             )
         }
+        is JobState.Imported -> {
+            val r = s.result
+            ResultDialog(
+                stringResource(R.string.import_done_title),
+                listOfNotNull(
+                    stringResource(R.string.restore_done, r.added, r.alreadyHere),
+                    r.mmsSkipped.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.import_mms_skipped, it, it) },
+                    r.unreadable.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.import_unreadable, it, it) },
+                ).joinToString("\n\n"),
+            )
+        }
         is JobState.Failed -> ResultDialog(
-            stringResource(if (s.kind == JobKind.Backup) R.string.backup_failed_title else R.string.restore_failed_title),
+            stringResource(
+                when (s.kind) {
+                    JobKind.Backup -> R.string.backup_failed_title
+                    JobKind.Restore -> R.string.restore_failed_title
+                    JobKind.Import -> R.string.import_failed_title
+                },
+            ),
             stringResource(
                 when (s.reason) {
                     FailReason.WrongPin -> R.string.restore_wrong_pin
-                    FailReason.NotABackup -> R.string.restore_not_backup
-                    FailReason.File -> if (s.kind == JobKind.Backup) R.string.backup_file_error else R.string.restore_file_error
+                    FailReason.NotABackup -> if (s.kind == JobKind.Import) R.string.import_not_backup else R.string.restore_not_backup
+                    FailReason.TooLarge -> R.string.import_too_large
+                    FailReason.File -> when (s.kind) {
+                        JobKind.Backup -> R.string.backup_file_error
+                        else -> R.string.restore_file_error
+                    }
                 },
             ),
         )
