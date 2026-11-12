@@ -11,9 +11,23 @@
         <item quantity="other">%1$d unread</item>
     </plurals>
     <string name="new_message">New message</string>
+    <string name="search">Search</string>
+    <string name="work_contact">Work contact</string>
+    <string name="details">Details</string>
+    <string name="call">Call</string>
+    <string name="view_contact">View contact</string>
+    <string name="add_contact">Add to contacts</string>
+    <string name="search_hint">Search</string>
+    <string name="search_prompt">Search names, numbers and messages</string>
+    <string name="search_empty">Nothing found</string>
+    <string name="clear_search">Clear search</string>
     <string name="back">Back</string>
     <string name="to_label">To</string>
-    <string name="to_hint">Phone number</string>
+    <string name="to_hint">Name or phone number</string>
+    <string name="send_to_number">Send to %1$s</string>
+    <string name="to_not_number">Pick a contact or type a phone number</string>
+    <string name="use_dialpad">Type with the number pad</string>
+    <string name="use_keyboard">Type with the keyboard</string>
     <string name="message_hint">Text message</string>
     <string name="send">Send</string>
     <string name="send_with_sim">Send with %1$s</string>

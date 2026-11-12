@@ -1,5 +1,10 @@
 package dev.aalman.budstikke
 
+import dev.aalman.budstikke.ui.DetailsScreen
+import android.provider.ContactsContract
+import android.net.Uri
+import android.graphics.Rect
+import android.content.ActivityNotFoundException
 import android.Manifest
 import android.app.role.RoleManager
 import android.content.Context
@@ -69,6 +74,7 @@ import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.ContactRepository
 import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
+import dev.aalman.budstikke.data.SearchResult
 import dev.aalman.budstikke.notify.ActiveConversation
 import dev.aalman.budstikke.notify.MessageNotifier
 import dev.aalman.budstikke.settings.SettingsRepository
@@ -79,6 +85,7 @@ import dev.aalman.budstikke.sms.preferredSim
 import dev.aalman.budstikke.ui.ConversationListScreen
 import dev.aalman.budstikke.ui.ConversationScreen
 import dev.aalman.budstikke.ui.RoleScreen
+import dev.aalman.budstikke.ui.SearchScreen
 import dev.aalman.budstikke.ui.SettingsScreen
 import dev.aalman.budstikke.ui.theme.BudstikkeTheme
 import kotlinx.coroutines.Dispatchers
@@ -86,7 +93,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** A conversation open on screen: its thread in the message store and who it is with. */
-private data class OpenThread(val threadId: Long, val address: String)
+private data class OpenThread(
+    val threadId: Long,
+    val address: String,
+    /** A message to scroll to on opening, such as the one a search found. */
+    val focusMessageId: Long? = null,
+    /** Text to mark in every message, the search that led here. */
+    val highlight: String? = null,
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -98,6 +112,10 @@ class MainActivity : ComponentActivity() {
     private var showTrash by mutableStateOf(false)
     private var showBlocked by mutableStateOf(false)
     private var showScheduled by mutableStateOf(false)
+    private var showSearch by mutableStateOf(false)
+    // Kept here rather than in the search screen, which leaves composition while a
+    // conversation opened from it is showing; back from there finds the same search.
+    private var searchQuery by mutableStateOf("")
     private var sims by mutableStateOf<List<Sim>>(emptyList())
 
     private val requestRole =
@@ -123,6 +141,8 @@ class MainActivity : ComponentActivity() {
         showTrash = savedInstanceState?.getBoolean(STATE_TRASH) ?: false
         showBlocked = savedInstanceState?.getBoolean(STATE_BLOCKED) ?: false
         showScheduled = savedInstanceState?.getBoolean(STATE_SCHEDULED) ?: false
+        showSearch = savedInstanceState?.getBoolean(STATE_SEARCH) ?: false
+        searchQuery = savedInstanceState?.getString(STATE_SEARCH_QUERY).orEmpty()
 
         val conversations = ConversationRepository(this)
         val messages = MessageRepository(this)
@@ -144,6 +164,28 @@ class MainActivity : ComponentActivity() {
                         requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS))
                     }
                     thread != null -> ConversationRoute(thread, messages, sender, sims, undo) { openThread = null }
+                    showSearch -> {
+                        val closeSearch = {
+                            showSearch = false
+                            searchQuery = ""
+                        }
+                        BackHandler(onBack = closeSearch)
+                        SearchRoute(
+                            conversations,
+                            searchQuery,
+                            onQueryChange = { searchQuery = it },
+                            onOpen = { result ->
+                                val conversation = result.conversation
+                                openThread = OpenThread(
+                                    conversation.threadId,
+                                    conversation.address,
+                                    focusMessageId = result.message?.id,
+                                    highlight = searchQuery.trim().takeIf { result.message != null },
+                                )
+                            },
+                            onBack = closeSearch,
+                        )
+                    }
                     showBlocked -> {
                         BackHandler { showBlocked = false }
                         BlockedRoute(
@@ -193,6 +235,7 @@ class MainActivity : ComponentActivity() {
                         onShowArchive = { showArchive = true },
                         onShowTrash = { showTrash = true },
                         onSettings = { showSettings = true },
+                        onSearch = { showSearch = true },
                     )
                 }
                     SnackbarHost(
@@ -228,6 +271,8 @@ class MainActivity : ComponentActivity() {
         outState.putBoolean(STATE_TRASH, showTrash)
         outState.putBoolean(STATE_BLOCKED, showBlocked)
         outState.putBoolean(STATE_SCHEDULED, showScheduled)
+        outState.putBoolean(STATE_SEARCH, showSearch)
+        outState.putString(STATE_SEARCH_QUERY, searchQuery)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
             outState.putString(STATE_ADDRESS, it.address)
@@ -271,6 +316,8 @@ class MainActivity : ComponentActivity() {
         private const val STATE_TRASH = "trash"
         private const val STATE_BLOCKED = "blocked"
         private const val STATE_SCHEDULED = "scheduled"
+        private const val STATE_SEARCH = "search"
+        private const val STATE_SEARCH_QUERY = "search_query"
 
         /** Opens one conversation, reusing the activity if it is already running. */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
@@ -371,8 +418,44 @@ private fun ConversationRoute(
         MessageNotifier(context).cancel(thread.threadId)
     }
 
+    val onArchiveChange: (Boolean) -> Unit = { archived ->
+        scope.launch(Dispatchers.IO) { flagStore.setArchived(listOf(thread.threadId), archived) }
+        // An archived conversation leaves the list it was opened from, so go back to it.
+        if (archived) onBack()
+    }
+    val onBlockChange: (Boolean) -> Unit = { block ->
+        if (block) {
+            val title = contact?.name ?: thread.address
+            blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
+            // The conversation moves to Spam & blocked, out of the list it was opened from.
+            onBack()
+        } else {
+            scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
+        }
+    }
+    // The details screen stands in for the conversation, so back from it returns here.
+    var showDetails by rememberSaveable(thread.threadId) { mutableStateOf(false) }
+    if (showDetails) {
+        BackHandler { showDetails = false }
+        DetailsScreen(
+            address = thread.address,
+            contact = contact,
+            flags = flags,
+            blocked = blocked,
+            onCall = { openExternal(context, Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", thread.address, null))) },
+            onContact = { openContact(context, contact, thread.address) },
+            onBlockChange = onBlockChange,
+            onArchiveChange = onArchiveChange,
+            onBack = { showDetails = false },
+        )
+        return
+    }
+
     ConversationScreen(
         address = thread.address,
+        onShowDetails = { showDetails = true },
+        focusMessageId = thread.focusMessageId,
+        highlight = thread.highlight,
         contact = contact,
         messages = messages,
         sims = sims,
@@ -408,11 +491,7 @@ private fun ConversationRoute(
         onPinChange = { pinned ->
             scope.launch(Dispatchers.IO) { flagStore.setPinned(listOf(thread.threadId), pinned) }
         },
-        onArchiveChange = { archived ->
-            scope.launch(Dispatchers.IO) { flagStore.setArchived(listOf(thread.threadId), archived) }
-            // An archived conversation leaves the list it was opened from, so go back to it.
-            if (archived) onBack()
-        },
+        onArchiveChange = onArchiveChange,
         onDeleteMessages = { ids ->
             scope.launch {
                 val item = withContext(Dispatchers.IO) { trash.deleteMessages(thread.address, ids) }
@@ -423,16 +502,7 @@ private fun ConversationRoute(
             }
         },
         blocked = blocked,
-        onBlockChange = { block ->
-            if (block) {
-                val title = contact?.name ?: thread.address
-                blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
-                // The conversation moves to Spam & blocked, out of the list it was opened from.
-                onBack()
-            } else {
-                scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
-            }
-        },
+        onBlockChange = onBlockChange,
         onDeleteConversation = {
             deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
             onBack()
@@ -481,6 +551,7 @@ private fun ConversationListRoute(
     onShowArchive: (() -> Unit)? = null,
     onShowTrash: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -516,6 +587,7 @@ private fun ConversationListRoute(
         onShowArchive = onShowArchive,
         onShowTrash = onShowTrash,
         onSettings = onSettings,
+        onSearch = onSearch,
     )
 }
 
@@ -566,6 +638,31 @@ private fun blockConversations(
             ?: resources.getQuantityString(R.plurals.blocked_count, threads.size, threads.size)
         undo.push(message) { threads.forEach { blockList.unblock(it.second) } }
     }
+}
+
+/** How long typing must pause before a search runs, so each key press does not query. */
+private const val SEARCH_DELAY_MILLIS = 150L
+
+@Composable
+private fun SearchRoute(
+    repository: ConversationRepository,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onOpen: (SearchResult) -> Unit,
+    onBack: () -> Unit,
+) {
+    // The previous results stay up while the next search runs, so the list does not blink
+    // empty on every key press.
+    var results by remember { mutableStateOf<List<SearchResult>?>(null) }
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            results = null
+            return@LaunchedEffect
+        }
+        delay(SEARCH_DELAY_MILLIS)
+        results = withContext(Dispatchers.IO) { repository.search(query) }
+    }
+    SearchScreen(query, onQueryChange, results, onOpen, onBack)
 }
 
 @Composable
@@ -656,4 +753,34 @@ private fun TrashRoute(undo: UndoQueue, onBack: () -> Unit) {
         onEmpty = { scope.launch(Dispatchers.IO) { trash.empty() } },
         onBack = onBack,
     )
+}
+
+/** Starts another app's screen, doing nothing when no app on the phone handles it. */
+private fun openExternal(context: Context, intent: Intent) {
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+    }
+}
+
+/**
+ * Opens a saved contact in the contacts app, or offers to save [address] as a new one.
+ * QuickContact opens work profile contacts too, which a plain view intent cannot reach.
+ */
+private fun openContact(context: Context, contact: Contact?, address: String) {
+    val uri = contact?.lookupUri
+    if (uri != null) {
+        try {
+            ContactsContract.QuickContact.showQuickContact(context, Rect(), uri, ContactsContract.QuickContact.MODE_LARGE, null)
+        } catch (_: ActivityNotFoundException) {
+            openExternal(context, Intent(Intent.ACTION_VIEW, uri))
+        }
+    } else {
+        openExternal(
+            context,
+            Intent(ContactsContract.Intents.Insert.ACTION)
+                .setType(ContactsContract.RawContacts.CONTENT_TYPE)
+                .putExtra(ContactsContract.Intents.Insert.PHONE, address),
+        )
+    }
 }

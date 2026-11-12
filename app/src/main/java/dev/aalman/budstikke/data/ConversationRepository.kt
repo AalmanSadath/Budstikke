@@ -84,6 +84,49 @@ class ConversationRepository(context: Context) {
         }
         .flowOn(Dispatchers.IO)
 
+    /**
+     * Conversations in every folder that match [query] by contact name, number or sender
+     * name, newest first, then those where only a message's text matches, by that message's
+     * date. Call off the main thread.
+     */
+    fun search(query: String): List<SearchResult> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val all = load() ?: return emptyList()
+        val messages = matchingMessages(q)
+        val byName = all.filter { matchesConversation(it.title, it.address, q) }
+        val named = byName.mapTo(HashSet()) { it.threadId }
+        val byText = all
+            .filter { it.threadId !in named && it.threadId in messages }
+            .map { SearchResult(it, messages.getValue(it.threadId)) }
+            .sortedByDescending { it.message!!.dateMillis }
+        return byName.map { SearchResult(it, null) } + byText
+    }
+
+    /** The newest message in each thread whose text holds [query], case-insensitively. */
+    private fun matchingMessages(query: String): Map<Long, MatchedMessage> {
+        val found = HashMap<Long, MatchedMessage>()
+        resolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms._ID),
+            "${Telephony.Sms.BODY} LIKE ? ESCAPE '\\'",
+            arrayOf("%${escapeLike(query)}%"),
+            "${Telephony.Sms.DATE} DESC",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val thread = c.getLong(0)
+                if (thread in found) continue
+                found[thread] = MatchedMessage(
+                    id = c.getLong(4),
+                    body = c.getString(1).orEmpty(),
+                    dateMillis = c.getLong(2),
+                    fromMe = c.getInt(3) != Telephony.Sms.MESSAGE_TYPE_INBOX,
+                )
+            }
+        }
+        return found
+    }
+
     private fun load(): List<Conversation>? {
         val latest = LinkedHashMap<Long, Conversation>()
         val unread = HashMap<Long, Int>()

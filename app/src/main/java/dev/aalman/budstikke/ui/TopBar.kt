@@ -1,6 +1,9 @@
 package dev.aalman.budstikke.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -40,6 +43,8 @@ fun TopBar(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
+    /** Makes the leading content and title one tappable area, such as to open details. */
+    onTitleClick: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     Column(
@@ -64,19 +69,27 @@ fun TopBar(
                     )
                 }
             }
-            if (leading != null) {
-                Spacer(Modifier.width(4.dp))
-                leading()
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (leading != null) {
+                    Spacer(Modifier.width(4.dp))
+                    leading()
+                }
+                Text(
+                    text = title,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Text(
-                text = title,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             actions()
         }
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)

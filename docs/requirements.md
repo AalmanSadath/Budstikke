@@ -49,12 +49,12 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R4. Conversation list
 
-- [ ] Every SMS conversation already on the phone is listed, newest first, with name or number,
+- [x] Every SMS conversation already on the phone is listed, newest first, with name or number,
       the last message's text (prefixed "You:" when sent), and a relative time ("7 min",
       "Yesterday", "Oct 31").
-- [ ] Unread conversations are visibly distinct (bold name and text, unread count).
-- [ ] Search finds conversations by contact name, number, and message text.
-- [ ] A button starts a new conversation: pick a contact, or type a number and choose
+- [x] Unread conversations are visibly distinct (bold name and text, unread count).
+- [x] Search finds conversations by contact name, number, and message text.
+- [x] A button starts a new conversation: pick a contact, or type a number and choose
       "Send to <number>".
 
 ## R5. Conversation avatars and contact photos
@@ -115,12 +115,12 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R11. Block numbers
 
-- [ ] A number can be blocked from the conversation's contact details screen ("Block number")
+- [x] A number can be blocked from the conversation's contact details screen ("Block number")
       and from the list.
-- [ ] Messages from a blocked number produce no notification and do not appear in the main
+- [x] Messages from a blocked number produce no notification and do not appear in the main
       list; they are kept in a "Spam & blocked" folder.
-- [ ] Blocked numbers can be listed and unblocked in settings.
-- [ ] Messages from blocked numbers do not count towards the launcher badge.
+- [x] Blocked numbers can be listed and unblocked in settings.
+- [x] Messages from blocked numbers do not count towards the launcher badge.
 
 ## R12. Drafts
 
@@ -171,10 +171,10 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 ## R18. Work profile contacts
 
-- [ ] On a phone with a work profile, searching in "New conversation" and in the list finds
+- [x] On a phone with a work profile, searching in "New conversation" and in the list finds
       both personal and work contacts.
-- [ ] Work contacts carry a briefcase badge on their avatar.
-- [ ] Without a work profile, nothing changes and no badge appears.
+- [x] Work contacts carry a briefcase badge on their avatar.
+- [x] Without a work profile, nothing changes and no badge appears.
 
 ## R19. Reactions
 

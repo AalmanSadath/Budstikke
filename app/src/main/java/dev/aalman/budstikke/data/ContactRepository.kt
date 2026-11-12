@@ -23,7 +23,24 @@ import java.util.concurrent.ConcurrentHashMap
  * store: a new photo keeps the same [photoUri], so the version is what tells a screen to
  * load it again.
  */
-data class Contact(val name: String, val photoUri: Uri?, val version: Int = 0)
+data class Contact(
+    val name: String,
+    val photoUri: Uri?,
+    val version: Int = 0,
+    /** Saved in the work profile rather than the personal one. */
+    val work: Boolean = false,
+    /** Opens this contact in the contacts app, where it can be seen and edited. */
+    val lookupUri: Uri? = null,
+)
+
+/** One saved number of a contact, as found by [ContactRepository.search]. */
+data class ContactMatch(
+    val name: String,
+    val number: String,
+    /** The number's type as the contacts app names it: "Mobile", "Work", a custom label. */
+    val label: String,
+    val contact: Contact,
+)
 
 /**
  * Looks up saved contacts by phone number, through Android's own matching so that
@@ -88,6 +105,60 @@ class ContactRepository private constructor(context: Context) {
         return contact
     }
 
+    /**
+     * Saved phone numbers whose contact name or number matches [text], as Android's own
+     * contact search finds them, at most [limit]. Empty without access to contacts.
+     */
+    fun search(text: String, limit: Int = SEARCH_LIMIT): List<ContactMatch> {
+        if (text.isBlank() || !canRead) return emptyList()
+        val personal = searchDirectory(text.trim(), ContactsContract.Directory.DEFAULT, limit)
+        // The work profile's contacts, when there is one and its admin allows looking them
+        // up from the personal side. Without one this finds nothing.
+        val work = searchDirectory(text.trim(), ContactsContract.Directory.ENTERPRISE_DEFAULT, limit - personal.size)
+        return personal + work
+    }
+
+    private fun searchDirectory(text: String, directory: Long, limit: Int): List<ContactMatch> {
+        if (limit <= 0) return emptyList()
+        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.ENTERPRISE_CONTENT_FILTER_URI, Uri.encode(text))
+            .buildUpon()
+            .appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY, directory.toString())
+            .build()
+        return runCatching {
+            resolver.query(
+                uri,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.TYPE,
+                    ContactsContract.CommonDataKinds.Phone.LABEL,
+                    ContactsContract.CommonDataKinds.Phone.PHOTO_THUMBNAIL_URI,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                val seen = HashSet<Pair<Long, String>>()
+                buildList {
+                    while (c.moveToNext() && size < limit) {
+                        val number = c.getString(2)?.takeIf { it.isNotBlank() } ?: continue
+                        val id = c.getLong(0)
+                        // A number saved twice on one contact, often once per account.
+                        if (!seen.add(id to number.filter { it.isDigit() || it == '+' })) continue
+                        val name = c.getString(1)?.takeIf { it.isNotBlank() } ?: number
+                        val label = ContactsContract.CommonDataKinds.Phone.getTypeLabel(
+                            context.resources, c.getInt(3), c.getString(4),
+                        ).toString()
+                        val work = directory == ContactsContract.Directory.ENTERPRISE_DEFAULT ||
+                            ContactsContract.Contacts.isEnterpriseContactId(id)
+                        add(ContactMatch(name, number, label, Contact(name, c.getString(5)?.let(Uri::parse), version.value, work)))
+                    }
+                }
+            }
+        }.getOrNull().orEmpty()
+    }
+
     /** The contact's photo thumbnail, or null when there is none or it cannot be read. */
     fun photo(uri: Uri): Bitmap? {
         photos.get(uri)?.let { return it }
@@ -115,24 +186,39 @@ class ContactRepository private constructor(context: Context) {
     private fun query(address: String): Contact? {
         // A sender name such as "BANK" is not a number and cannot match a contact.
         if (address.none(Char::isDigit)) return null
-        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address))
+        // The enterprise lookup finds personal contacts first, then work ones when the phone
+        // has a work profile that allows it; without one it is the same as the plain lookup.
+        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.ENTERPRISE_CONTENT_FILTER_URI, Uri.encode(address))
         return runCatching {
             resolver.query(
                 uri,
-                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME, ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI),
+                arrayOf(
+                    ContactsContract.PhoneLookup.DISPLAY_NAME,
+                    ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI,
+                    ContactsContract.PhoneLookup._ID,
+                    ContactsContract.PhoneLookup.LOOKUP_KEY,
+                ),
                 null,
                 null,
                 null,
             )?.use { c ->
                 if (!c.moveToFirst()) return@use null
                 val name = c.getString(0)?.takeIf { it.isNotBlank() } ?: return@use null
-                Contact(name, c.getString(1)?.let(Uri::parse), version.value)
+                val id = c.getLong(2)
+                Contact(
+                    name,
+                    c.getString(1)?.let(Uri::parse),
+                    version.value,
+                    work = ContactsContract.Contacts.isEnterpriseContactId(id),
+                    lookupUri = c.getString(3)?.let { ContactsContract.Contacts.getLookupUri(id, it) },
+                )
             }
         }.getOrNull()
     }
 
     companion object {
         private const val PHOTO_CACHE_SIZE = 64
+        private const val SEARCH_LIMIT = 50
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

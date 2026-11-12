@@ -1,5 +1,10 @@
 package dev.aalman.budstikke.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.combinedClickable
@@ -84,6 +89,9 @@ fun ConversationScreen(
     onPendingAction: (PendingMessage, PendingAction) -> Unit,
     onSchedule: () -> Unit,
     onBack: () -> Unit,
+    onShowDetails: () -> Unit = {},
+    focusMessageId: Long? = null,
+    highlight: String? = null,
 ) {
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
     var selected by rememberSaveable(address, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
@@ -118,18 +126,53 @@ fun ConversationScreen(
                 }
             }
         } else {
-            TopBar(contact?.name ?: address, onBack = onBack, leading = { Avatar(address, contact, size = 32.dp) }) {
-                ConversationMenu(flags, blocked, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
+            TopBar(
+                contact?.name ?: address,
+                onBack = onBack,
+                leading = { Avatar(address, contact, size = 32.dp) },
+                onTitleClick = onShowDetails,
+            ) {
+                ConversationMenu(flags, blocked, onShowDetails, onPinChange, onArchiveChange, onDeleteConversation, onBlockChange)
             }
         }
         val listState = rememberLazyListState()
         val newest = messages.lastOrNull()
+        // Opened at a message, from search: the list goes there once messages load, and that
+        // message is tinted for a moment so the eye finds it. Until the person drags the list,
+        // sends or schedules, the list stays anchored there: messages loading, a pending one
+        // loading after them, or one arriving must not pull it back to the bottom.
+        var anchored by remember(focusMessageId) { mutableStateOf(focusMessageId != null) }
+        var focusDone by remember(focusMessageId) { mutableStateOf(focusMessageId == null) }
+        var flashId by remember(focusMessageId) { mutableStateOf<Long?>(null) }
+        LaunchedEffect(focusMessageId, messages.isNotEmpty()) {
+            if (focusDone || messages.isEmpty()) return@LaunchedEffect
+            focusDone = true
+            val at = messages.indexOfFirst { it.id == focusMessageId }
+            if (at < 0) {
+                anchored = false
+                return@LaunchedEffect
+            }
+            // Bottom up, with pending messages below the rest.
+            listState.scrollToItem(pending.size + messages.lastIndex - at)
+            // Lift it from the bottom edge to about a third of the way up.
+            listState.scrollBy(-listState.layoutInfo.viewportSize.height / 3f)
+            flashId = focusMessageId
+            delay(FOCUS_FLASH_MILLIS)
+            flashId = null
+        }
+        // Only a drag by the person counts; the scrolls above do not.
+        LaunchedEffect(listState) {
+            listState.interactionSource.interactions.collect {
+                if (it is DragInteraction.Start) anchored = false
+            }
+        }
         // The list runs bottom up and keeps its place on the message it was showing, so a
         // new one would land out of sight below. Bring it into view when it is one just sent,
         // or when the newest was already showing; someone reading further up stays put.
         // By the time this runs the new message has pushed the list's place down by one, so
         // "was at the bottom" reads as index 1.
         LaunchedEffect(newest?.id) {
+            if (anchored) return@LaunchedEffect
             val wasAtBottom = listState.firstVisibleItemIndex <= 1
             if (newest != null && (newest.isOutgoing || wasAtBottom)) listState.animateScrollToItem(0)
         }
@@ -137,7 +180,7 @@ fun ConversationScreen(
         // rest the same way; bring it into view.
         val newestPending = pending.maxOfOrNull { it.id }
         LaunchedEffect(newestPending) {
-            if (newestPending != null) listState.animateScrollToItem(0)
+            if (newestPending != null && !anchored) listState.animateScrollToItem(0)
         }
         val focusManager = LocalFocusManager.current
         LazyColumn(
@@ -160,6 +203,8 @@ fun ConversationScreen(
                     message,
                     simLabel = sims.labelFor(message),
                     isSelected = message.id in selected,
+                    flash = message.id == flashId,
+                    highlight = highlight,
                     onClick = {
                         when {
                             selecting -> toggle()
@@ -176,9 +221,15 @@ fun ConversationScreen(
             sims = sims,
             sim = sim,
             onSimChange = onSimChange,
-            onSend = onSend,
+            onSend = {
+                anchored = false
+                onSend()
+            },
             modifier = Modifier.navigationBarsPadding(),
-            onSchedule = onSchedule,
+            onSchedule = {
+                anchored = false
+                onSchedule()
+            },
         )
     }
 }
@@ -296,6 +347,8 @@ private fun Bubble(
     message: Message,
     simLabel: String?,
     isSelected: Boolean,
+    flash: Boolean,
+    highlight: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -316,11 +369,23 @@ private fun Bubble(
         stringResource(R.string.message_from_them, time, message.body)
     }
     val primary = MaterialTheme.colorScheme.primary
+    val tint by animateColorAsState(
+        when {
+            isSelected -> primary.copy(alpha = 0.15f)
+            flash -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f)
+            else -> Color.Transparent
+        },
+        animationSpec = tween(FLASH_FADE_MILLIS),
+        label = "bubble tint",
+    )
+    val marked = MaterialTheme.colorScheme.let { colors ->
+        SpanStyle(background = colors.tertiaryContainer, color = colors.onTertiaryContainer)
+    }
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) primary.copy(alpha = 0.15f) else Color.Transparent)
+            .background(tint)
             .clearAndSetSemantics {
                 contentDescription = description
                 selected = isSelected
@@ -341,7 +406,7 @@ private fun Bubble(
             horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
         ) {
             Text(
-                message.body,
+                markMatches(message.body, highlight, marked),
                 Modifier
                     .clip(shape)
                     .background(
@@ -374,6 +439,7 @@ private fun Bubble(
 private fun ConversationMenu(
     flags: Flags,
     blocked: Boolean,
+    onShowDetails: () -> Unit,
     onPinChange: (Boolean) -> Unit,
     onArchiveChange: (Boolean) -> Unit,
     onDelete: () -> Unit,
@@ -389,6 +455,14 @@ private fun ConversationMenu(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.details)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_person), null) },
+                onClick = {
+                    open = false
+                    onShowDetails()
+                },
+            )
             // A blocked conversation lives only in Spam & blocked, so pins and the archive
             // have nothing to act on until it is unblocked.
             if (!flags.archived && !blocked) {
@@ -435,3 +509,7 @@ private val MessageSelectionSaver = Saver<Set<Long>, LongArray>(
     save = { it.toLongArray() },
     restore = { it.toSet() },
 )
+
+/** How long a message opened from search stays tinted, and how long the tint takes to fade. */
+private const val FOCUS_FLASH_MILLIS = 2_000L
+private const val FLASH_FADE_MILLIS = 600
