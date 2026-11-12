@@ -1,5 +1,14 @@
 package dev.aalman.budstikke
 
+import kotlinx.coroutines.flow.combine
+import dev.aalman.budstikke.data.Locks
+import dev.aalman.budstikke.data.LockState
+import androidx.activity.compose.LocalActivity
+import dev.aalman.budstikke.lock.LockSession
+import android.os.PersistableBundle
+import android.content.ClipboardManager
+import android.content.ClipDescription
+import android.content.ClipData
 import dev.aalman.budstikke.ui.DetailsScreen
 import android.provider.ContactsContract
 import android.net.Uri
@@ -385,6 +394,34 @@ private fun ConversationRoute(
     val flags by produceState(Flags(), thread.threadId) {
         flagStore.changes().collect { value = withContext(Dispatchers.IO) { flagStore.of(thread.threadId) } }
     }
+    val lockStore = remember { Locks.get(context) }
+    val lockState by produceState(LockState()) {
+        lockStore.changes().collect { value = withContext(Dispatchers.IO) { lockStore.state() } }
+    }
+    val unlocked by LockSession.unlocked.collectAsState()
+    val activity = LocalActivity.current
+    val unlockTitle = stringResource(R.string.unlock_title)
+    val unlock: (() -> Unit) -> Unit = { then -> activity?.let { LockSession.unlock(it, unlockTitle, then) } }
+    // Locking needs a screen lock to unlock with again; without one, say how to set it.
+    val ifCanLock: (() -> Unit) -> Unit = { then ->
+        if (LockSession.canLock(context)) {
+            then()
+        } else {
+            scope.launch {
+                undo.snackbar.currentSnackbarData?.dismiss()
+                undo.snackbar.showSnackbar(resources.getString(R.string.lock_needs_screen_lock))
+            }
+        }
+    }
+    val threadLocked = thread.threadId in lockState.threads
+    // A locked conversation asks for the screen lock as it opens, once.
+    var askedToUnlock by rememberSaveable(thread.threadId) { mutableStateOf(false) }
+    LaunchedEffect(threadLocked, unlocked) {
+        if (threadLocked && !unlocked && !askedToUnlock) {
+            askedToUnlock = true
+            unlock {}
+        }
+    }
     val contact by produceState<Contact?>(null, thread.address) {
         value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
         contacts.changes().collect {
@@ -454,6 +491,28 @@ private fun ConversationRoute(
     ConversationScreen(
         address = thread.address,
         onShowDetails = { showDetails = true },
+        locks = lockState,
+        threadId = thread.threadId,
+        unlocked = unlocked,
+        onUnlock = unlock,
+        onLockMessages = { ids, locked ->
+            val apply = { scope.launch(Dispatchers.IO) { lockStore.setMessagesLocked(ids, locked) } }
+            if (locked) ifCanLock { apply() } else apply()
+        },
+        onLockConversation = { locked ->
+            val apply = { scope.launch(Dispatchers.IO) { lockStore.setThreadLocked(thread.threadId, locked) } }
+            if (locked) ifCanLock { apply() } else unlock { apply() }
+        },
+        onCopyCode = { code ->
+            copyCode(context, code)
+            // Android 13 and later confirm a copy themselves; earlier ones do not.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                scope.launch {
+                    undo.snackbar.currentSnackbarData?.dismiss()
+                    undo.snackbar.showSnackbar(resources.getString(R.string.code_copied))
+                }
+            }
+        },
         focusMessageId = thread.focusMessageId,
         highlight = thread.highlight,
         contact = contact,
@@ -504,8 +563,12 @@ private fun ConversationRoute(
         blocked = blocked,
         onBlockChange = onBlockChange,
         onDeleteConversation = {
-            deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
-            onBack()
+            val delete = {
+                deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
+                onBack()
+            }
+            // Whatever is locked goes to the trash only once the screen lock is confirmed.
+            if (threadLocked || messages.any { it.id in lockState.messages }) unlock(delete) else delete()
         },
         onBack = onBack,
     )
@@ -559,6 +622,8 @@ private fun ConversationListRoute(
     val flagStore = remember { ConversationFlags.get(context) }
     val trash = remember { Trash.get(context) }
     val flow = remember(archive) { repository.conversations(if (archive) Folder.Archive else Folder.Main) }
+    val activity = LocalActivity.current
+    val unlockTitle = stringResource(R.string.unlock_title)
     val list by flow.collectAsStateWithLifecycle(initialValue = null)
     ConversationListScreen(
         conversations = list,
@@ -580,7 +645,15 @@ private fun ConversationListRoute(
             blockConversations(scope, undo, resources, context, chosen.map { Triple(it.threadId, it.address, it.title) })
         },
         onDelete = { chosen ->
-            deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to it.address }, context)
+            val delete = {
+                deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to it.address }, context)
+            }
+            // Whatever is locked goes to the trash only once the screen lock is confirmed.
+            if (chosen.any { it.hasLocked }) {
+                activity?.let { LockSession.unlock(it, unlockTitle) { delete() } }
+            } else {
+                delete()
+            }
         },
         onBack = onBack,
         onNewMessage = onNewMessage,
@@ -654,13 +727,14 @@ private fun SearchRoute(
     // The previous results stay up while the next search runs, so the list does not blink
     // empty on every key press.
     var results by remember { mutableStateOf<List<SearchResult>?>(null) }
-    LaunchedEffect(query) {
+    val unlocked by LockSession.unlocked.collectAsState()
+    LaunchedEffect(query, unlocked) {
         if (query.isBlank()) {
             results = null
             return@LaunchedEffect
         }
         delay(SEARCH_DELAY_MILLIS)
-        results = withContext(Dispatchers.IO) { repository.search(query) }
+        results = withContext(Dispatchers.IO) { repository.search(query, includeLocked = unlocked) }
     }
     SearchScreen(query, onQueryChange, results, onOpen, onBack)
 }
@@ -720,10 +794,12 @@ private fun ScheduledRoute(undo: UndoQueue, onOpen: (PendingMessage) -> Unit, on
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val contacts = remember { ContactRepository.get(context) }
+    val locks = remember { Locks.get(context) }
     val flow = remember {
-        Outgoing.get(context).all()
-            .map { all -> all.filter { !it.delayed }.map { ScheduledEntry(it, contacts.lookup(it.address)) } }
-            .flowOn(Dispatchers.IO)
+        combine(Outgoing.get(context).all(), locks.changes()) { all, _ ->
+            val lockedThreads = locks.state().threads
+            all.filter { !it.delayed }.map { ScheduledEntry(it, contacts.lookup(it.address), it.threadId in lockedThreads) }
+        }.flowOn(Dispatchers.IO)
     }
     val entries by flow.collectAsStateWithLifecycle(initialValue = null)
     ScheduledScreen(
@@ -783,4 +859,16 @@ private fun openContact(context: Context, contact: Contact?, address: String) {
                 .putExtra(ContactsContract.Intents.Insert.PHONE, address),
         )
     }
+}
+
+/**
+ * Puts a one-time code on the clipboard, marked sensitive so that Android 13 and later keep
+ * it out of the clipboard preview and keyboard suggestions.
+ */
+private fun copyCode(context: Context, code: String) {
+    val clip = ClipData.newPlainText(context.getString(R.string.one_time_code), code)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+    }
+    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
 }

@@ -1,5 +1,7 @@
 package dev.aalman.budstikke.ui
 
+import androidx.compose.runtime.collectAsState
+import dev.aalman.budstikke.lock.LockSession
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -42,7 +44,7 @@ import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.PendingMessage
 
 /** A scheduled message with the contact it goes to, when the number is saved. */
-data class ScheduledEntry(val message: PendingMessage, val contact: Contact?) {
+data class ScheduledEntry(val message: PendingMessage, val contact: Contact?, val locked: Boolean = false) {
     val title: String get() = contact?.name ?: message.address
 }
 
@@ -92,7 +94,10 @@ private fun ScheduledRow(
     val message = entry.message
     var menu by remember { mutableStateOf(false) }
     val time = messageTime(context, message.sendAtMillis)
-    val description = stringResource(R.string.scheduled_message, entry.title, time, message.body)
+    // A message waiting in a locked conversation keeps its text hidden here too.
+    val unlocked by LockSession.unlocked.collectAsState()
+    val body = if (entry.locked && !unlocked) stringResource(R.string.locked_message) else message.body
+    val description = stringResource(R.string.scheduled_message, entry.title, time, body)
     Box {
         Row(
             Modifier
@@ -116,7 +121,7 @@ private fun ScheduledRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    message.body,
+                    body,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

@@ -20,6 +20,9 @@
     <uses-permission
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32" />
+    <!-- Locked messages: asks Android's own fingerprint, face or screen lock prompt to
+         confirm it is the owner. The prompt is the system's; the app sees only the result. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />

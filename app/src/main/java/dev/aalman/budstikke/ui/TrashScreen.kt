@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.TrashItem
+import dev.aalman.budstikke.lock.LockSession
+import androidx.compose.runtime.collectAsState
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
@@ -108,10 +110,12 @@ fun TrashScreen(
 private fun TrashRow(item: TrashItem, onRestore: () -> Unit, onDeleteForever: () -> Unit) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
-    val summary = if (item.wholeConversation) {
-        pluralStringResource(R.plurals.trash_messages, item.messageCount, item.messageCount)
-    } else {
-        item.lastBody
+    val unlocked by LockSession.unlocked.collectAsState()
+    val summary = when {
+        item.wholeConversation -> pluralStringResource(R.plurals.trash_messages, item.messageCount, item.messageCount)
+        // A deleted locked message keeps its text hidden here too.
+        item.locked && !unlocked -> stringResource(R.string.locked_message)
+        else -> item.lastBody
     }
     val daysLeft = max(
         0L,
