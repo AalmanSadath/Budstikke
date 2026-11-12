@@ -6,6 +6,7 @@ activity-compose = "1.13.0"
 core = "1.19.1"
 lifecycle = "2.11.0"
 junit = "4.13.2"
+orgjson = "20260814"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -17,6 +18,8 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 junit = { module = "junit:junit", version.ref = "junit" }
+# Android has org.json built in; plain JVM tests need the real library in its place.
+orgjson = { module = "org.json:json", version.ref = "orgjson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

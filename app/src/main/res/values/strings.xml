@@ -178,4 +178,60 @@
     <string name="reactions_label">Reactions</string>
     <string name="reaction_yours">you %1$s</string>
     <string name="reaction_theirs">them %1$s</string>
+    <string name="settings_backup">Backup</string>
+    <string name="backup_messages">Back up messages</string>
+    <string name="backup_messages_hint">Saves every message and this app\'s own data to a file you choose, sealed with a PIN.</string>
+    <string name="restore_backup">Restore from a backup</string>
+    <string name="restore_backup_hint">Adds the messages and settings from a backup file. Messages already on this phone are not added twice.</string>
+    <string name="backup_pin_title">PIN for this backup</string>
+    <string name="backup_pin_hint">At least 6 digits or letters. Longer is safer: anyone with the file can try PINs as fast as their computer allows. Without the PIN the backup cannot be opened, not even by this app.</string>
+    <string name="restore_pin_title">PIN of the backup</string>
+    <string name="backup_pin">PIN</string>
+    <string name="backup_pin_again">PIN again</string>
+    <string name="backup_pin_short">At least 6 characters</string>
+    <string name="backup_pin_mismatch">The PINs differ</string>
+    <string name="backup_choose_file">Choose file</string>
+    <string name="backup_restore">Restore</string>
+    <string name="backup_running">Backing up…</string>
+    <string name="restore_running">Restoring…</string>
+    <string name="job_progress">%1$d of %2$d</string>
+    <string name="job_keep_open">Keep Budstikke open until this finishes.</string>
+    <string name="backup_done_title">Backup saved</string>
+    <string name="restore_done_title">Restore finished</string>
+    <plurals name="backup_done">
+        <item quantity="one">%1$d message saved and checked.</item>
+        <item quantity="other">%1$d messages saved and checked.</item>
+    </plurals>
+    <string name="restore_done">Messages added: %1$d. Already on this phone: %2$d.</string>
+    <plurals name="restore_scheduled_past">
+        <item quantity="one">%1$d scheduled message was left out because its time has passed.</item>
+        <item quantity="other">%1$d scheduled messages were left out because their time has passed.</item>
+    </plurals>
+    <string name="backup_failed_title">Backup failed</string>
+    <string name="restore_failed_title">Nothing was restored</string>
+    <string name="restore_wrong_pin">Wrong PIN, or the file is damaged. Nothing was changed.</string>
+    <string name="restore_not_backup">This file is not a Budstikke backup. Nothing was changed.</string>
+    <string name="backup_file_error">The file could not be written. Check that there is room and try another place.</string>
+    <string name="restore_file_error">The file could not be read, or the restore stopped partway. Restoring it again adds only what is missing.</string>
+    <string name="import_messages">Import messages</string>
+    <string name="import_messages_hint">Adds SMS from a backup made by this app or another one. Messages already on this phone are not added twice.</string>
+    <string name="import_source_budstikke">Budstikke backup</string>
+    <string name="import_source_budstikke_hint">A .budstikke file, opened with its PIN</string>
+    <string name="import_source_sms_ie">SMS Import / Export</string>
+    <string name="import_source_sms_ie_hint">The .zip it exports, or a .json from its older versions</string>
+    <string name="import_source_qksms">QKSMS</string>
+    <string name="import_source_qksms_hint">The .json backup from its settings</string>
+    <string name="import_running">Importing…</string>
+    <string name="import_done_title">Import finished</string>
+    <plurals name="import_mms_skipped">
+        <item quantity="one">%1$d MMS was skipped: Budstikke handles SMS only for now.</item>
+        <item quantity="other">%1$d MMS were skipped: Budstikke handles SMS only for now.</item>
+    </plurals>
+    <plurals name="import_unreadable">
+        <item quantity="one">%1$d entry could not be read and was left out.</item>
+        <item quantity="other">%1$d entries could not be read and were left out.</item>
+    </plurals>
+    <string name="import_failed_title">Nothing was imported</string>
+    <string name="import_not_backup">This file holds no messages Budstikke can read. Check that it is the backup from the app you chose.</string>
+    <string name="import_too_large">This file is too large to read at once. Export again from SMS Import / Export 2.0 or later, which saves a .zip that can be read in parts.</string>
 </resources>
