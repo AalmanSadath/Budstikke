@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.sms.Sim
 
 /**
@@ -77,7 +78,7 @@ fun ComposeBar(
                 .clip(RoundedCornerShape(24.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
-                .heightIn(min = 48.dp)
+                .heightIn(min = touchTarget(48.dp))
                 .padding(start = 4.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -110,7 +111,7 @@ fun ComposeBar(
         Box {
             Box(
                 Modifier
-                    .size(48.dp)
+                    .size(touchTarget(48.dp))
                     .clip(CircleShape)
                     .background(if (canSend) colors.primary else colors.onSurface.copy(alpha = 0.12f))
                     .combinedClickable(

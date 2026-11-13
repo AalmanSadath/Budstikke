@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.data.Conversation
 import dev.aalman.budstikke.lock.LockSession
 import androidx.compose.runtime.collectAsState
@@ -78,6 +79,7 @@ fun ConversationListScreen(
     onSearch: (() -> Unit)? = null,
 ) {
     var selected by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf(emptySet<Long>()) }
+    val reducedMotion = rememberReducedMotion()
     // Rows can leave the list while selected (archived elsewhere, or deleted by another app).
     LaunchedEffect(conversations) {
         val present = conversations?.mapTo(HashSet()) { it.threadId } ?: return@LaunchedEffect
@@ -94,48 +96,53 @@ fun ConversationListScreen(
             TopBar(
                 pluralStringResource(R.plurals.selected_count, selected.size, selected.size),
                 leading = {
-                    IconButton(onClick = { selected = emptySet() }, modifier = Modifier.size(40.dp)) {
-                        Icon(painterResource(R.drawable.ic_close), stringResource(R.string.clear_selection), tint = tint)
-                    }
+                    BarAction(R.drawable.ic_close, R.string.clear_selection) { selected = emptySet() }
                 },
-            ) {
-                // Left of the rest, so adding it moves none of the buttons that were there.
-                BarAction(R.drawable.ic_block, R.string.block_number) {
-                    onBlock(chosen)
-                    selected = emptySet()
-                }
-                BarAction(
-                    if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
-                    if (archive) R.string.unarchive else R.string.archive,
-                ) {
-                    onArchive(selected, !archive)
-                    selected = emptySet()
-                }
-                BarAction(R.drawable.ic_delete, R.string.delete) {
-                    onDelete(chosen)
-                    selected = emptySet()
-                }
-                // Pin takes the settings button's place, so archive and delete sit where
-                // Archived and Trash were and nothing moves when selecting starts.
-                if (!archive) {
-                    // Pin unless every selected row is pinned already, as other mail and
-                    // message apps do with a mixed selection.
-                    val pin = chosen.any { !it.flags.pinned }
-                    BarAction(R.drawable.ic_pin, if (pin) R.string.pin else R.string.unpin) {
-                        onPin(selected, pin)
+                items = listOfNotNull(
+                    // Left of the rest, so adding it moves none of the buttons that were there.
+                    BarItem(R.drawable.ic_block, R.string.block_number) {
+                        onBlock(chosen)
                         selected = emptySet()
-                    }
-                }
-            }
+                    },
+                    BarItem(
+                        if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
+                        if (archive) R.string.unarchive else R.string.archive,
+                    ) {
+                        onArchive(selected, !archive)
+                        selected = emptySet()
+                    },
+                    BarItem(R.drawable.ic_delete, R.string.delete) {
+                        onDelete(chosen)
+                        selected = emptySet()
+                    },
+                    // Pin takes the settings button's place, so archive and delete sit where
+                    // Archived and Trash were and nothing moves when selecting starts. Pin
+                    // unless every selected row is pinned already, as other mail and message
+                    // apps do with a mixed selection.
+                    if (archive) {
+                        null
+                    } else {
+                        val pin = chosen.any { !it.flags.pinned }
+                        BarItem(R.drawable.ic_pin, if (pin) R.string.pin else R.string.unpin) {
+                            onPin(selected, pin)
+                            selected = emptySet()
+                        }
+                    },
+                ),
+            )
         } else {
-            TopBar(stringResource(if (archive) R.string.archived else R.string.app_name), onBack = onBack) {
-                // Leftmost, so the buttons selecting puts in their places line up as before.
-                onSearch?.let { BarAction(R.drawable.ic_search, R.string.search, it) }
-                onShowStarred?.let { BarAction(R.drawable.ic_star_outline, R.string.starred, it) }
-                onShowArchive?.let { BarAction(R.drawable.ic_archive, R.string.archived, it) }
-                onShowTrash?.let { BarAction(R.drawable.ic_delete, R.string.trash, it) }
-                onSettings?.let { BarAction(R.drawable.ic_settings, R.string.settings, it) }
-            }
+            TopBar(
+                stringResource(if (archive) R.string.archived else R.string.app_name),
+                onBack = onBack,
+                // Search leftmost, so the buttons selecting puts in their places line up as before.
+                items = listOfNotNull(
+                    onSearch?.let { BarItem(R.drawable.ic_search, R.string.search, onClick = it) },
+                    onShowStarred?.let { BarItem(R.drawable.ic_star_outline, R.string.starred, onClick = it) },
+                    onShowArchive?.let { BarItem(R.drawable.ic_archive, R.string.archived, onClick = it) },
+                    onShowTrash?.let { BarItem(R.drawable.ic_delete, R.string.trash, onClick = it) },
+                    onSettings?.let { BarItem(R.drawable.ic_settings, R.string.settings, onClick = it) },
+                ),
+            )
         }
         when {
             conversations == null -> Unit
@@ -161,7 +168,7 @@ fun ConversationListScreen(
                         showPin = !archive,
                         onClick = { if (selecting) toggle() else onOpen(conversation) },
                         onLongClick = toggle,
-                        modifier = Modifier.animateItem(),
+                        modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
                     )
                 }
             }
@@ -180,13 +187,6 @@ fun ConversationListScreen(
                 Icon(painterResource(R.drawable.ic_edit), contentDescription = stringResource(R.string.new_message))
             }
         }
-    }
-}
-
-@Composable
-internal fun BarAction(icon: Int, label: Int, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-        Icon(painterResource(icon), stringResource(label), tint = MaterialTheme.colorScheme.onSurface)
     }
 }
 

@@ -24,7 +24,27 @@ data class Settings(
     val defaultSubscriptionId: Int = SubscriptionManager.INVALID_SUBSCRIPTION_ID,
     /** Seconds a sent message waits, and can be cancelled, before it goes out; 0 for none. */
     val sendDelaySeconds: Int = 0,
+    /** Accessibility mode, with each of its parts that can be turned off on its own. */
+    val accessibility: Accessibility = Accessibility(),
 )
+
+/**
+ * Accessibility mode: one switch, and its four parts, each on by default once the mode is
+ * on. A part counts only while the mode is on, so turning the mode off undoes all of them
+ * and turning it on again brings back the same choice.
+ */
+data class Accessibility(
+    val on: Boolean = false,
+    val highContrast: Boolean = true,
+    val largerText: Boolean = true,
+    val largerTargets: Boolean = true,
+    val reducedMotion: Boolean = true,
+) {
+    val useHighContrast: Boolean get() = on && highContrast
+    val useLargerText: Boolean get() = on && largerText
+    val useLargerTargets: Boolean get() = on && largerTargets
+    val useReducedMotion: Boolean get() = on && reducedMotion
+}
 
 /** The send delays Settings offers, in seconds. */
 val SEND_DELAYS = listOf(0, 3, 5, 10, 30)
@@ -49,6 +69,11 @@ class SettingsRepository private constructor(context: Context) {
             if (next.accent != null) putInt(KEY_ACCENT, next.accent) else remove(KEY_ACCENT)
             putInt(KEY_SUBSCRIPTION, next.defaultSubscriptionId)
             putInt(KEY_SEND_DELAY, next.sendDelaySeconds)
+            putBoolean(KEY_A11Y, next.accessibility.on)
+            putBoolean(KEY_A11Y_CONTRAST, next.accessibility.highContrast)
+            putBoolean(KEY_A11Y_TEXT, next.accessibility.largerText)
+            putBoolean(KEY_A11Y_TARGETS, next.accessibility.largerTargets)
+            putBoolean(KEY_A11Y_MOTION, next.accessibility.reducedMotion)
         }
         state.value = next
     }
@@ -63,6 +88,15 @@ class SettingsRepository private constructor(context: Context) {
             defaultSubscriptionId = prefs.getInt(KEY_SUBSCRIPTION, defaults.defaultSubscriptionId),
             sendDelaySeconds = prefs.getInt(KEY_SEND_DELAY, defaults.sendDelaySeconds)
                 .takeIf { it in SEND_DELAYS } ?: defaults.sendDelaySeconds,
+            accessibility = defaults.accessibility.let { a ->
+                Accessibility(
+                    on = prefs.getBoolean(KEY_A11Y, a.on),
+                    highContrast = prefs.getBoolean(KEY_A11Y_CONTRAST, a.highContrast),
+                    largerText = prefs.getBoolean(KEY_A11Y_TEXT, a.largerText),
+                    largerTargets = prefs.getBoolean(KEY_A11Y_TARGETS, a.largerTargets),
+                    reducedMotion = prefs.getBoolean(KEY_A11Y_MOTION, a.reducedMotion),
+                )
+            },
         )
     }
 
@@ -76,6 +110,11 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_ACCENT = "accent"
         private const val KEY_SUBSCRIPTION = "default_subscription"
         private const val KEY_SEND_DELAY = "send_delay_seconds"
+        private const val KEY_A11Y = "accessibility"
+        private const val KEY_A11Y_CONTRAST = "accessibility_contrast"
+        private const val KEY_A11Y_TEXT = "accessibility_text"
+        private const val KEY_A11Y_TARGETS = "accessibility_targets"
+        private const val KEY_A11Y_MOTION = "accessibility_motion"
 
         @Volatile
         private var instance: SettingsRepository? = null

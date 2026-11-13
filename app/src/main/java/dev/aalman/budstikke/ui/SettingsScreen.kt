@@ -55,7 +55,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.telephony.SubscriptionManager
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.settings.SEND_DELAYS
+import dev.aalman.budstikke.settings.Accessibility
+import androidx.compose.foundation.selection.toggleable
 import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.settings.ThemeMode
 import dev.aalman.budstikke.settings.ThemeSource
@@ -65,7 +68,7 @@ import dev.aalman.budstikke.ui.theme.parseHex
 import dev.aalman.budstikke.ui.theme.toHex
 
 /** Accents offered as swatches: BifroSSH's three, then a spread around the wheel. */
-private val accentSwatches = listOf(
+internal val accentSwatches = listOf(
     0x58A6FF, 0xA78BFA, 0x155397, 0x10B981, 0x84CC16,
     0xF59E0B, 0xEF4444, 0xEC4899, 0x06B6D4, 0x8B5CF6,
 )
@@ -124,6 +127,9 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 accent = settings.accent,
                 onAccent = { accent -> repository.update { it.copy(accent = accent) } },
             )
+
+            Spacer(Modifier.height(28.dp))
+            AccessibilitySection(settings.accessibility) { a11y -> repository.update { it.copy(accessibility = a11y) } }
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_sending))
@@ -219,7 +225,7 @@ private fun <T> Choices(
             val shape = RoundedCornerShape(8.dp)
             Box(
                 Modifier
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = touchTarget(48.dp))
                     .clip(shape)
                     .background(if (isSelected) accent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainer)
                     .border(
@@ -246,21 +252,58 @@ private fun <T> Choices(
 }
 
 @Composable
-private fun SwitchRow(title: String, hint: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    title: String,
+    hint: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val fade = if (enabled) 1f else 0.5f
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .clickable(role = Role.Switch) { onCheckedChange(!checked) },
+            .heightIn(min = touchTarget(56.dp))
+            .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-            Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = fade))
+            Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = fade))
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
+}
+
+/** Accessibility mode's switch, with its four parts under it, usable while it is on. */
+@Composable
+private fun AccessibilitySection(a11y: Accessibility, onChange: (Accessibility) -> Unit) {
+    SectionHeading(stringResource(R.string.settings_accessibility))
+    SwitchRow(
+        stringResource(R.string.accessibility_mode),
+        stringResource(R.string.accessibility_mode_hint),
+        a11y.on,
+        { onChange(a11y.copy(on = it)) },
+    )
+    val part = Modifier.padding(start = 16.dp)
+    SwitchRow(
+        stringResource(R.string.accessibility_contrast), stringResource(R.string.accessibility_contrast_hint),
+        a11y.highContrast, { onChange(a11y.copy(highContrast = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_text), stringResource(R.string.accessibility_text_hint),
+        a11y.largerText, { onChange(a11y.copy(largerText = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_targets), stringResource(R.string.accessibility_targets_hint),
+        a11y.largerTargets, { onChange(a11y.copy(largerTargets = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_motion), stringResource(R.string.accessibility_motion_hint),
+        a11y.reducedMotion, { onChange(a11y.copy(reducedMotion = it)) }, part, enabled = a11y.on,
+    )
 }
 
 @Composable
@@ -268,7 +311,7 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = touchTarget(52.dp))
             .selectable(selected, role = Role.RadioButton, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -288,7 +331,7 @@ internal fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = touchTarget(52.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
     ) {
@@ -352,7 +395,7 @@ private fun Swatch(colour: Int?, selected: Boolean, description: String, onClick
     val ring = MaterialTheme.colorScheme.onBackground
     Box(
         Modifier
-            .size(48.dp)
+            .size(touchTarget(48.dp))
             .clip(CircleShape)
             .border(if (selected) 3.dp else 1.dp, if (selected) ring else MaterialTheme.colorScheme.outline, CircleShape)
             .padding(5.dp)

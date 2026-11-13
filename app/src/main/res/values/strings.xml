@@ -47,7 +47,7 @@
     <string name="state_sent">Sent</string>
     <string name="state_delivered">Delivered</string>
     <string name="state_failed">Not sent. Tap to retry.</string>
-    <string name="message_from_them">Message received %1$s: %2$s</string>
+    <string name="message_from_them">Message from %1$s, %2$s: %3$s</string>
     <string name="message_from_you">You sent %1$s: %2$s. %3$s</string>
     <string name="channel_messages">Messages</string>
     <string name="notification_you">You</string>
@@ -234,4 +234,16 @@
     <string name="import_failed_title">Nothing was imported</string>
     <string name="import_not_backup">This file holds no messages Budstikke can read. Check that it is the backup from the app you chose.</string>
     <string name="import_too_large">This file is too large to read at once. Export again from SMS Import / Export 2.0 or later, which saves a .zip that can be read in parts.</string>
+    <string name="locked">Locked</string>
+    <string name="settings_accessibility">Accessibility</string>
+    <string name="accessibility_mode">Accessibility mode</string>
+    <string name="accessibility_mode_hint">Turns on the parts below. Each can be turned off on its own.</string>
+    <string name="accessibility_contrast">High contrast</string>
+    <string name="accessibility_contrast_hint">Text and controls stand out at least 7 to 1 from what is behind them</string>
+    <string name="accessibility_text">Larger text</string>
+    <string name="accessibility_text_hint">Text 30% larger than the system\'s text size</string>
+    <string name="accessibility_targets">Larger touch targets</string>
+    <string name="accessibility_targets_hint">Every button at least 56 dp</string>
+    <string name="accessibility_motion">Reduced motion</string>
+    <string name="accessibility_motion_hint">Messages and lists appear and move without animation</string>
 </resources>

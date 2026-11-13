@@ -74,7 +74,7 @@ The app can take the SMS role and does everything Android expects of the holder.
 - [x] Consecutive messages from the same side group together, with a time label between groups
       that are far apart in time.
 - [x] A newly sent or received message animates into place rather than appearing at once.
-- [ ] With reduced motion on (R20), the same message appears without animation.
+- [x] With reduced motion on (R20), the same message appears without animation.
 
 ## R7. Backup and restore, PIN-encrypted
 
@@ -191,14 +191,14 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 A single "Accessibility mode" switch in settings, with its parts adjustable.
 
-- [ ] With TalkBack on, every button, avatar, bubble and status icon is read with a useful
+- [x] With TalkBack on, every button, avatar, bubble and status icon is read with a useful
       description ("Message from Dad, 4:45 PM, It is on the kitchen table").
-- [ ] High-contrast theme: text and controls meet at least 7:1 contrast against their
+- [x] High-contrast theme: text and controls meet at least 7:1 contrast against their
       background.
-- [ ] Larger text: message and list text scale beyond the system font size setting, and
+- [x] Larger text: message and list text scale beyond the system font size setting, and
       nothing is cut off.
-- [ ] Larger touch targets: every tappable control is at least 56 dp.
-- [ ] Reduced motion: no bubble, list or screen-change animation plays.
+- [x] Larger touch targets: every tappable control is at least 56 dp.
+- [x] Reduced motion: no bubble, list or screen-change animation plays.
 
 ## R21. Message import
 
