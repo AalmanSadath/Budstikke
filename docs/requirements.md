@@ -211,13 +211,13 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 
 ## R22. Colours and themes
 
-- [ ] Theme choices: Dynamic (Material 3 colours from the wallpaper, Android 12 and later),
+- [x] Theme choices: Dynamic (Material 3 colours from the wallpaper, Android 12 and later),
       BifroSSH dark, BifroSSH light, BifroSSH AMOLED (true black).
-- [ ] Each choice can follow the system's light or dark mode or be fixed by hand.
-- [ ] An accent colour can be picked in either Dynamic or BifroSSH themes, replacing the
+- [x] Each choice can follow the system's light or dark mode or be fixed by hand.
+- [x] An accent colour can be picked in either Dynamic or BifroSSH themes, replacing the
       accent everywhere it shows.
-- [ ] Text on accent and danger colours stays readable in every theme (at least 4.5:1).
-- [ ] Changing theme applies at once, without restarting.
+- [x] Text on accent and danger colours stays readable in every theme (at least 4.5:1).
+- [x] Changing theme applies at once, without restarting.
 
 ## R23. Launcher name
 

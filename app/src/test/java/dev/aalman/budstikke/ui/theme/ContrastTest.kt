@@ -8,7 +8,8 @@ import org.junit.Test
 
 /**
  * Every BifroSSH palette, with its own accent and with every offered swatch, checked
- * against WCAG contrast: all text and controls at 7:1 in high-contrast mode (R20). Wallpaper colours come from
+ * against WCAG contrast: text on the accent and danger colours at 4.5:1 always (R22), and
+ * all text and controls at 7:1 in high-contrast mode (R20). Wallpaper colours come from
  * the phone at run time and cannot be listed here; a picked accent and high contrast go
  * through the same functions on them.
  */
@@ -27,6 +28,26 @@ class ContrastTest {
     private fun check(failures: MutableList<String>, what: String, fg: Color, bg: Color, min: Double) {
         val c = contrast(fg, bg)
         if (c < min) failures += "$what: %.2f < $min".format(c)
+    }
+
+    @Test
+    fun textOnAccentAndDangerIsReadableInEveryTheme() {
+        val failures = mutableListOf<String>()
+        for ((name, s, _) in schemes()) {
+            check(failures, "$name onPrimary/primary", s.onPrimary, s.primary, NORMAL_CONTRAST)
+            check(failures, "$name onError/error", s.onError, s.error, NORMAL_CONTRAST)
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test
+    fun anyPickedAccentGetsReadableText() {
+        val failures = mutableListOf<String>()
+        for (rgb in 0..0xFFFFFF step 0x010307) {
+            val s = BifrosshDark.withAccent(rgb)
+            check(failures, toHex(rgb), s.onPrimary, s.primary, NORMAL_CONTRAST)
+        }
+        assertTrue(failures.take(20).joinToString("\n"), failures.isEmpty())
     }
 
     @Test

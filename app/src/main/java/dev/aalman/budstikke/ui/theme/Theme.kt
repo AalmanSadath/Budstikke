@@ -9,6 +9,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.LocalActivity
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import android.provider.Settings
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -142,6 +146,17 @@ fun BudstikkeTheme(content: @Composable () -> Unit) {
         Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
     val density = LocalDensity.current
+    // The status and navigation bar icons follow the app's light or dark, which can be set by
+    // hand apart from the system's; otherwise dark icons can sit on a dark app.
+    val activity = LocalActivity.current
+    val view = LocalView.current
+    SideEffect {
+        val window = activity?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
     CompositionLocalProvider(
         LocalHighContrast provides a11y.useHighContrast,
         LocalReducedMotion provides (a11y.useReducedMotion || systemNoMotion),
@@ -187,8 +202,10 @@ private fun ColorScheme.trueBlack(): ColorScheme = copy(
 
 /** Replaces the accent roles with a chosen colour and the text colour that reads on it. */
 internal fun ColorScheme.withAccent(rgb: Int): ColorScheme {
-    val accent = Color(0xFF000000 or rgb.toLong())
     val on = Color(0xFF000000 or onAccent(rgb).toLong())
+    // A mid accent may fall just short of 4.5:1 with either text colour; take it a little
+    // further from its text until it reads.
+    val accent = strengthen(Color(0xFF000000 or rgb.toLong()), if (on == Color.White) Color.Black else Color.White, listOf(on), NORMAL_CONTRAST)
     val shade = Color(0xFF000000 or accentShade(rgb).toLong())
     return copy(
         primary = accent,
