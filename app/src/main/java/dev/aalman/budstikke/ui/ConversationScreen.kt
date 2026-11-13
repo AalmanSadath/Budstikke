@@ -118,6 +118,8 @@ fun ConversationScreen(
     onComposeTextChange: (String) -> Unit,
     sim: Sim?,
     onSimChange: (Sim) -> Unit,
+    /** The slot of the SIM the next message goes out on, for the badge by the name; null for none. */
+    simBadge: Int?,
     onSend: () -> Unit,
     onRetry: (Message) -> Unit,
     flags: Flags,
@@ -216,6 +218,8 @@ fun ConversationScreen(
                 onBack = onBack,
                 leading = { Avatar(address, contact, size = 32.dp) },
                 onTitleClick = onShowDetails,
+                titleTrailing = simBadge?.let { slot -> { SimBadge(slot, 18.dp, Modifier.padding(end = 8.dp)) } },
+                titleTrailingWidth = if (simBadge != null) 18.dp * 1.5f + 8.dp else 0.dp,
             ) {
                 ConversationMenu(
                     flags, blocked, threadId in locks.threads, onShowDetails, onPinChange, onArchiveChange,

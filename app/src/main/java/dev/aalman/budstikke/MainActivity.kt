@@ -102,6 +102,7 @@ import dev.aalman.budstikke.ui.ConversationScreen
 import dev.aalman.budstikke.ui.RoleScreen
 import dev.aalman.budstikke.ui.SearchScreen
 import dev.aalman.budstikke.ui.SettingsScreen
+import dev.aalman.budstikke.ui.simSlots
 import dev.aalman.budstikke.ui.theme.BudstikkeTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -245,6 +246,7 @@ class MainActivity : ComponentActivity() {
                         ConversationListRoute(
                             conversations,
                             undo,
+                            sims,
                             archive = true,
                             onOpen = { openThread = OpenThread(it.threadId, it.address) },
                             onBack = { showArchive = false },
@@ -253,6 +255,7 @@ class MainActivity : ComponentActivity() {
                     else -> ConversationListRoute(
                         conversations,
                         undo,
+                        sims,
                         archive = false,
                         onOpen = { openThread = OpenThread(it.threadId, it.address) },
                         onNewMessage = { startActivity(Intent(this@MainActivity, ComposeActivity::class.java)) },
@@ -571,6 +574,7 @@ private fun ConversationRoute(
         onComposeTextChange = { text = it },
         sim = sim,
         onSimChange = { chosenSubscription = it.subscriptionId },
+        simBadge = sim?.let { simSlots(sims, settings.showSimBadge)[it.subscriptionId] },
         onSend = {
             val body = text.trim()
             if (body.isNotEmpty()) {
@@ -656,6 +660,7 @@ private fun ConversationRoute(
 private fun ConversationListRoute(
     repository: ConversationRepository,
     undo: UndoQueue,
+    sims: List<Sim>,
     archive: Boolean,
     onOpen: (Conversation) -> Unit,
     onBack: (() -> Unit)? = null,
@@ -675,9 +680,11 @@ private fun ConversationListRoute(
     val activity = LocalActivity.current
     val unlockTitle = stringResource(R.string.unlock_title)
     val list by flow.collectAsStateWithLifecycle(initialValue = null)
+    val settings by SettingsRepository.get(context).settings.collectAsState()
     ConversationListScreen(
         conversations = list,
         archive = archive,
+        simSlots = simSlots(sims, settings.showSimBadge),
         onOpen = onOpen,
         onPin = { ids, pinned -> scope.launch(Dispatchers.IO) { flagStore.setPinned(ids, pinned) } },
         onArchive = { ids, archived ->

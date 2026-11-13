@@ -60,6 +60,9 @@ fun TopBar(
     leading: (@Composable () -> Unit)? = null,
     /** Makes the leading content and title one tappable area, such as to open details. */
     onTitleClick: (() -> Unit)? = null,
+    /** Something small drawn right after the title, such as a SIM badge, and its width. */
+    titleTrailing: (@Composable () -> Unit)? = null,
+    titleTrailingWidth: Dp = 0.dp,
     /** Buttons for the right of the bar; those that do not fit go into a menu. */
     items: List<BarItem> = emptyList(),
     /** Anything else for the right of the bar, after [items]. */
@@ -81,7 +84,7 @@ fun TopBar(
         // move into a menu instead of squeezing the title down to a letter or two.
         val fixed = 8.dp + (if (onBack != null) button else 0.dp) + (if (leading != null) LEADING_WIDTH else 0.dp)
         // The title's padding, and a little over for rounding.
-        val titleRoom = minOf(titleWidth + 20.dp, maxWidth * TITLE_SHARE)
+        val titleRoom = minOf(titleWidth + 20.dp + titleTrailingWidth, maxWidth * TITLE_SHARE)
         val (shown, menu) = splitBarItems(items, ((maxWidth - fixed - titleRoom) / button).toInt())
         Row(
             Modifier
@@ -104,13 +107,14 @@ fun TopBar(
                 }
                 Text(
                     text = title,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier.weight(1f, fill = false).padding(horizontal = 8.dp, vertical = 6.dp),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                titleTrailing?.invoke()
             }
             shown.forEach { BarAction(it.icon, it.label, it.onClick) }
             if (menu.isNotEmpty()) BarMenu(menu)

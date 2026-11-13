@@ -179,6 +179,14 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                     }
                 }
             }
+            if (sims.size > 1) {
+                SwitchRow(
+                    title = stringResource(R.string.settings_sim_badge),
+                    hint = null,
+                    checked = settings.showSimBadge,
+                    onCheckedChange = { on -> repository.update { it.copy(showSimBadge = on) } },
+                )
+            }
             Spacer(Modifier.height(16.dp))
             Label(stringResource(R.string.settings_send_delay))
             Choices(
