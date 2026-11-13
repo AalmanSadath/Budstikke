@@ -12,9 +12,7 @@ import dev.aalman.budstikke.data.Locks
 import dev.aalman.budstikke.data.LockState
 import androidx.activity.compose.LocalActivity
 import dev.aalman.budstikke.lock.LockSession
-import android.os.PersistableBundle
 import android.content.ClipboardManager
-import android.content.ClipDescription
 import android.content.ClipData
 import dev.aalman.budstikke.ui.DetailsScreen
 import android.provider.ContactsContract
@@ -93,6 +91,7 @@ import dev.aalman.budstikke.data.MessageRepository
 import dev.aalman.budstikke.data.SearchResult
 import dev.aalman.budstikke.notify.ActiveConversation
 import dev.aalman.budstikke.notify.MessageNotifier
+import dev.aalman.budstikke.notify.copyCode
 import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.sms.SmsSender
@@ -933,18 +932,6 @@ private fun openContact(context: Context, contact: Contact?, address: String) {
                 .putExtra(ContactsContract.Intents.Insert.PHONE, address),
         )
     }
-}
-
-/**
- * Puts a one-time code on the clipboard, marked sensitive so that Android 13 and later keep
- * it out of the clipboard preview and keyboard suggestions.
- */
-private fun copyCode(context: Context, code: String) {
-    val clip = ClipData.newPlainText(context.getString(R.string.one_time_code), code)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
-    }
-    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
 }
 
 /** Puts the text of [messages], oldest first, on the clipboard, one message per line. */
