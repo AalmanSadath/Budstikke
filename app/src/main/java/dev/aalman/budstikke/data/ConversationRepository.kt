@@ -27,6 +27,8 @@ data class Conversation(
     val snippetLocked: Boolean = false,
     /** The conversation is locked, or holds a locked message: deleting it asks to unlock. */
     val hasLocked: Boolean = false,
+    /** The SIM the newest message came in on or went out from, as a subscription id. */
+    val subscriptionId: Int = -1,
 ) {
     val folder: Folder
         get() = when {
@@ -145,6 +147,7 @@ class ConversationRepository(context: Context) {
             Telephony.Sms.TYPE,
             Telephony.Sms.READ,
             Telephony.Sms._ID,
+            Telephony.Sms.SUBSCRIPTION_ID,
         )
         val lockState = locks.state()
         val withLocked = HashSet<Long>()
@@ -163,6 +166,7 @@ class ConversationRepository(context: Context) {
             val type = c.getColumnIndexOrThrow(Telephony.Sms.TYPE)
             val read = c.getColumnIndexOrThrow(Telephony.Sms.READ)
             val id = c.getColumnIndexOrThrow(Telephony.Sms._ID)
+            val sub = c.getColumnIndexOrThrow(Telephony.Sms.SUBSCRIPTION_ID)
             while (c.moveToNext()) {
                 val threadId = c.getLong(thread)
                 val messageLocked = c.getLong(id) in lockState.messages
@@ -180,6 +184,7 @@ class ConversationRepository(context: Context) {
                         lastFromMe = !isInbox,
                         unreadCount = 0,
                         snippetLocked = messageLocked,
+                        subscriptionId = c.getInt(sub),
                     )
                 }
             }

@@ -65,6 +65,8 @@ import androidx.compose.runtime.collectAsState
 fun ConversationListScreen(
     conversations: List<Conversation>?,
     archive: Boolean,
+    /** Slot numbers by subscription id, for the SIM badges; empty when they are off. */
+    simSlots: Map<Int, Int> = emptyMap(),
     onOpen: (Conversation) -> Unit,
     onPin: (Set<Long>, Boolean) -> Unit,
     onArchive: (Set<Long>, Boolean) -> Unit,
@@ -163,6 +165,7 @@ fun ConversationListScreen(
                         conversation,
                         isSelected = conversation.threadId in selected,
                         showPin = !archive,
+                        simSlot = simSlots[conversation.subscriptionId],
                         onClick = { if (selecting) toggle() else onOpen(conversation) },
                         onLongClick = toggle,
                         modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
@@ -205,7 +208,10 @@ internal fun ConversationRow(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     query: String? = null,
+    /** The slot of the SIM the newest message used, for its badge, or null for none. */
+    simSlot: Int? = null,
 ) {
+    val simLabel = simSlot?.let { stringResource(R.string.sim_badge, it) }.orEmpty()
     val pinned = showPin && conversation.flags.pinned
     val pinnedLabel = if (pinned) stringResource(R.string.pinned) else ""
     val workLabel = if (conversation.contact?.work == true) stringResource(R.string.work_contact) else ""
@@ -248,7 +254,7 @@ internal fun ConversationRow(
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .semantics(mergeDescendants = true) {
                 selected = isSelected
-                contentDescription = listOf(conversation.title, workLabel, pinnedLabel, unreadLabel, snippet, time)
+                contentDescription = listOf(conversation.title, simLabel, workLabel, pinnedLabel, unreadLabel, snippet, time)
                     .filter { it.isNotEmpty() }
                     .joinToString(", ")
             },
@@ -258,15 +264,22 @@ internal fun ConversationRow(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    markMatches(conversation.title, query, mark),
-                    Modifier.weight(1f),
-                    fontSize = 16.sp,
-                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // A long name gives way before the SIM badge does.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        markMatches(conversation.title, query, mark),
+                        Modifier.weight(1f, fill = false),
+                        fontSize = 16.sp,
+                        fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (simSlot != null) {
+                        Spacer(Modifier.width(6.dp))
+                        SimBadge(simSlot, 16.dp)
+                    }
+                }
                 Spacer(Modifier.width(8.dp))
                 if (pinned) {
                     Icon(

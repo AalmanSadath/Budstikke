@@ -9,9 +9,9 @@ import android.telephony.SubscriptionManager
 
 /**
  * An active SIM that can send SMS. [name] is the name saved for it in Android's SIM settings,
- * which defaults to the carrier's; [slotLabel] is "SIM 1", "SIM 2" and so on.
+ * which defaults to the carrier's; [slotLabel] is "SIM 1", "SIM 2" and so on, and [slot] its number.
  */
-data class Sim(val subscriptionId: Int, val slotLabel: String, val name: String)
+data class Sim(val subscriptionId: Int, val slotLabel: String, val name: String, val slot: Int = 0)
 
 /**
  * The phone's active SIMs, in slot order. Empty when the app may not read phone state,
@@ -32,6 +32,7 @@ fun activeSims(context: Context): List<Sim> {
                 subscriptionId = it.subscriptionId,
                 slotLabel = slot,
                 name = it.displayName?.toString()?.takeIf { name -> name.isNotBlank() } ?: slot,
+                slot = it.simSlotIndex + 1,
             )
         }
 }

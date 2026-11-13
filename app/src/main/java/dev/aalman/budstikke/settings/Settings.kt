@@ -24,6 +24,8 @@ data class Settings(
     val defaultSubscriptionId: Int = SubscriptionManager.INVALID_SUBSCRIPTION_ID,
     /** Seconds a sent message waits, and can be cancelled, before it goes out; 0 for none. */
     val sendDelaySeconds: Int = 0,
+    /** A SIM badge beside each conversation's name, when more than one SIM is active. */
+    val showSimBadge: Boolean = false,
     /** Accessibility mode, with each of its parts that can be turned off on its own. */
     val accessibility: Accessibility = Accessibility(),
 )
@@ -69,6 +71,7 @@ class SettingsRepository private constructor(context: Context) {
             if (next.accent != null) putInt(KEY_ACCENT, next.accent) else remove(KEY_ACCENT)
             putInt(KEY_SUBSCRIPTION, next.defaultSubscriptionId)
             putInt(KEY_SEND_DELAY, next.sendDelaySeconds)
+            putBoolean(KEY_SIM_BADGE, next.showSimBadge)
             putBoolean(KEY_A11Y, next.accessibility.on)
             putBoolean(KEY_A11Y_CONTRAST, next.accessibility.highContrast)
             putBoolean(KEY_A11Y_TEXT, next.accessibility.largerText)
@@ -88,6 +91,7 @@ class SettingsRepository private constructor(context: Context) {
             defaultSubscriptionId = prefs.getInt(KEY_SUBSCRIPTION, defaults.defaultSubscriptionId),
             sendDelaySeconds = prefs.getInt(KEY_SEND_DELAY, defaults.sendDelaySeconds)
                 .takeIf { it in SEND_DELAYS } ?: defaults.sendDelaySeconds,
+            showSimBadge = prefs.getBoolean(KEY_SIM_BADGE, defaults.showSimBadge),
             accessibility = defaults.accessibility.let { a ->
                 Accessibility(
                     on = prefs.getBoolean(KEY_A11Y, a.on),
@@ -110,6 +114,7 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_ACCENT = "accent"
         private const val KEY_SUBSCRIPTION = "default_subscription"
         private const val KEY_SEND_DELAY = "send_delay_seconds"
+        private const val KEY_SIM_BADGE = "show_sim_badge"
         private const val KEY_A11Y = "accessibility"
         private const val KEY_A11Y_CONTRAST = "accessibility_contrast"
         private const val KEY_A11Y_TEXT = "accessibility_text"
