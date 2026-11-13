@@ -59,13 +59,11 @@
     <string name="settings_theme">Colours</string>
     <string name="settings_theme_dynamic">Wallpaper</string>
     <string name="settings_theme_custom">Custom</string>
-    <string name="settings_theme_dynamic_unavailable">Wallpaper colours need Android 12 or later.</string>
     <string name="settings_mode">Light or dark</string>
     <string name="settings_mode_system">System</string>
     <string name="settings_mode_light">Light</string>
     <string name="settings_mode_dark">Dark</string>
     <string name="settings_true_black">True black</string>
-    <string name="settings_true_black_hint">Pure black backgrounds in dark mode, for AMOLED screens.</string>
     <string name="settings_accent">Accent colour</string>
     <string name="settings_accent_theme">Theme accent</string>
     <string name="settings_accent_custom">Accent %1$s</string>
@@ -74,7 +72,6 @@
     <string name="settings_sending">Sending</string>
     <string name="settings_sim">SIM for new messages</string>
     <string name="settings_sim_system">System default</string>
-    <string name="settings_sim_hint">Replies from a notification go out on the SIM the message came in on.</string>
     <string name="settings_sim_none">SIM choice needs phone access.</string>
     <string name="archived">Archived</string>
     <string name="archived_empty">No archived conversations</string>
@@ -140,7 +137,6 @@
     <string name="unblocked_done">%1$s unblocked</string>
     <string name="open">Open</string>
     <string name="settings_blocking">Blocking</string>
-    <string name="settings_blocked_hint">Blocked numbers and the messages they sent</string>
     <plurals name="blocked_count">
         <item quantity="one">%1$d number blocked</item>
         <item quantity="other">%1$d numbers blocked</item>
@@ -158,11 +154,9 @@
     <string name="edit">Edit</string>
     <string name="scheduled_title">Scheduled messages</string>
     <string name="scheduled_empty">No scheduled messages</string>
-    <string name="scheduled_hint">Messages waiting to go out, soonest first</string>
     <string name="scheduled_message">Scheduled message to %1$s, %2$s: %3$s</string>
     <string name="settings_send_delay">Send delay</string>
     <string name="settings_send_delay_off">Off</string>
-    <string name="settings_send_delay_hint">A sent message waits this long first, with a countdown and Cancel, so a mistake can be caught. Replies from a notification go at once.</string>
     <string name="seconds_short">%1$d s</string>
     <string name="sending_in">Sending in %1$d s</string>
     <string name="copy">Copy</string>
@@ -180,9 +174,7 @@
     <string name="reaction_theirs">them %1$s</string>
     <string name="settings_backup">Backup</string>
     <string name="backup_messages">Back up messages</string>
-    <string name="backup_messages_hint">Saves every message and this app\'s own data to a file you choose, sealed with a PIN.</string>
     <string name="restore_backup">Restore from a backup</string>
-    <string name="restore_backup_hint">Adds the messages and settings from a backup file. Messages already on this phone are not added twice.</string>
     <string name="backup_pin_title">PIN for this backup</string>
     <string name="backup_pin_hint">At least 6 digits or letters. Longer is safer: anyone with the file can try PINs as fast as their computer allows. Without the PIN the backup cannot be opened, not even by this app.</string>
     <string name="restore_pin_title">PIN of the backup</string>
@@ -214,7 +206,6 @@
     <string name="backup_file_error">The file could not be written. Check that there is room and try another place.</string>
     <string name="restore_file_error">The file could not be read, or the restore stopped partway. Restoring it again adds only what is missing.</string>
     <string name="import_messages">Import messages</string>
-    <string name="import_messages_hint">Adds SMS from a backup made by this app or another one. Messages already on this phone are not added twice.</string>
     <string name="import_source_budstikke">Budstikke backup</string>
     <string name="import_source_budstikke_hint">A .budstikke file, opened with its PIN</string>
     <string name="import_source_sms_ie">SMS Import / Export</string>
@@ -246,4 +237,9 @@
     <string name="accessibility_targets_hint">Every button at least 56 dp</string>
     <string name="accessibility_motion">Reduced motion</string>
     <string name="accessibility_motion_hint">Messages and lists appear and move without animation</string>
+    <string name="launcher_messages">Messages</string>
+    <string name="settings_launcher_name">Name under the icon</string>
+    <string name="settings_launcher_hint">This changes the name in the app drawer. Some launchers remove the icon from the home screen when the name changes; add it again from the app drawer.</string>
+    <string name="settings_launcher_change">Change name</string>
+    <string name="scheduled_hint">Messages waiting to go out, soonest first</string>
 </resources>

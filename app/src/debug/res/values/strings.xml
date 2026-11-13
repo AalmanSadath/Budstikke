@@ -2,4 +2,5 @@
 <resources>
     <!-- Tells the debug build apart from the release one in the launcher and the default SMS app picker. -->
     <string name="app_name">Budstikke Debug</string>
+    <string name="launcher_messages">Messages Debug</string>
 </resources>

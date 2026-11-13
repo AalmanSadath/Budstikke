@@ -26,7 +26,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -57,6 +59,7 @@ import android.telephony.SubscriptionManager
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.settings.SEND_DELAYS
+import dev.aalman.budstikke.settings.LauncherName
 import dev.aalman.budstikke.settings.Accessibility
 import androidx.compose.foundation.selection.toggleable
 import dev.aalman.budstikke.settings.SettingsRepository
@@ -75,7 +78,8 @@ internal val accentSwatches = listOf(
 
 @Composable
 fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: () -> Unit, onBack: () -> Unit) {
-    val repository = SettingsRepository.get(LocalContext.current)
+    val context = LocalContext.current
+    val repository = SettingsRepository.get(context)
     val settings by repository.settings.collectAsState()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -99,7 +103,6 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 enabled = { it != ThemeSource.Dynamic || dynamicColourAvailable },
                 onSelect = { source -> repository.update { it.copy(themeSource = source) } },
             )
-            if (!dynamicColourAvailable) Hint(stringResource(R.string.settings_theme_dynamic_unavailable))
 
             Spacer(Modifier.height(16.dp))
             Label(stringResource(R.string.settings_mode))
@@ -116,7 +119,7 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
             Spacer(Modifier.height(12.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_true_black),
-                hint = stringResource(R.string.settings_true_black_hint),
+                hint = null,
                 checked = settings.trueBlack,
                 onCheckedChange = { on -> repository.update { it.copy(trueBlack = on) } },
             )
@@ -127,6 +130,32 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 accent = settings.accent,
                 onAccent = { accent -> repository.update { it.copy(accent = accent) } },
             )
+
+            Spacer(Modifier.height(16.dp))
+            Label(stringResource(R.string.settings_launcher_name))
+            var messagesName by remember { mutableStateOf(LauncherName.isMessages(context)) }
+            var confirmName by remember { mutableStateOf<Boolean?>(null) }
+            Choices(
+                options = listOf(false to stringResource(R.string.app_name), true to stringResource(R.string.launcher_messages)),
+                selected = messagesName,
+                onSelect = { messages -> if (messages != messagesName) confirmName = messages },
+            )
+            // Some launchers drop a home-screen icon when the name changes; say so first.
+            confirmName?.let { messages ->
+                AlertDialog(
+                    onDismissRequest = { confirmName = null },
+                    title = { Text(stringResource(R.string.settings_launcher_name)) },
+                    text = { Text(stringResource(R.string.settings_launcher_hint)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            LauncherName.set(context, messages)
+                            messagesName = messages
+                            confirmName = null
+                        }) { Text(stringResource(R.string.settings_launcher_change)) }
+                    },
+                    dismissButton = { TextButton(onClick = { confirmName = null }) { Text(stringResource(R.string.cancel)) } },
+                )
+            }
 
             Spacer(Modifier.height(28.dp))
             AccessibilitySection(settings.accessibility) { a11y -> repository.update { it.copy(accessibility = a11y) } }
@@ -149,7 +178,6 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                         }
                     }
                 }
-                Hint(stringResource(R.string.settings_sim_hint))
             }
             Spacer(Modifier.height(16.dp))
             Label(stringResource(R.string.settings_send_delay))
@@ -160,13 +188,12 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 selected = settings.sendDelaySeconds,
                 onSelect = { seconds -> repository.update { it.copy(sendDelaySeconds = seconds) } },
             )
-            Hint(stringResource(R.string.settings_send_delay_hint))
             Spacer(Modifier.height(12.dp))
-            LinkRow(stringResource(R.string.scheduled_title), stringResource(R.string.scheduled_hint), onShowScheduled)
+            LinkRow(stringResource(R.string.scheduled_title), onClick = onShowScheduled)
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))
-            LinkRow(stringResource(R.string.blocked_title), stringResource(R.string.settings_blocked_hint), onShowBlocked)
+            LinkRow(stringResource(R.string.blocked_title), onClick = onShowBlocked)
 
             Spacer(Modifier.height(28.dp))
             BackupSection()
@@ -254,7 +281,7 @@ private fun <T> Choices(
 @Composable
 private fun SwitchRow(
     title: String,
-    hint: String,
+    hint: String?,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -270,7 +297,7 @@ private fun SwitchRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = fade))
-            Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = fade))
+            if (hint != null) Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = fade))
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
@@ -327,16 +354,17 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
 
 /** A row that opens another page. */
 @Composable
-internal fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
+internal fun LinkRow(title: String, hint: String? = null, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
             .heightIn(min = touchTarget(52.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-        Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (hint != null) Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

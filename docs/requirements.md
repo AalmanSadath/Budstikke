@@ -221,11 +221,10 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 
 ## R23. Launcher name
 
-- [ ] By default the name under the app icon is "Budstikke".
-- [ ] A setting changes it to "Messages"; after the change, the app drawer shows "Messages".
-- [ ] Open question: what the switch does to an icon already placed on the home screen (it may
-      be removed or need re-adding on some launchers). Decide and state it in the setting's
-      description.
+- [x] By default the name under the app icon is "Budstikke".
+- [x] A setting changes it to "Messages"; after the change, the app drawer shows "Messages".
+- [x] Switching asks first, saying that some launchers remove an icon already placed on the
+      home screen when the name changes, and that it can be added again from the app drawer.
 
 ## R24. No network access
 
