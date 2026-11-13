@@ -67,7 +67,7 @@ class MessageNotifier(context: Context) {
             style.addMessage(body, it.dateMillis, sender)
         }
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -78,9 +78,17 @@ class MessageNotifier(context: Context) {
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setContentIntent(openIntent(threadId, address))
-            .addAction(replyAction(threadId, address))
-            .addAction(markReadAction(threadId))
-            .build()
+        // A code is something to copy, not answer: its notification offers Copy code alone,
+        // and the system is kept from adding a second copy button.
+        val code = codeToCopy(unread.map { it.id to it.body }) { locks.isLocked(threadId, it) }
+        if (code != null) {
+            builder.addAction(copyCodeAction(threadId, code.messageId))
+            builder.setAllowSystemGeneratedContextualActions(false)
+        } else {
+            builder.addAction(replyAction(threadId, address))
+            builder.addAction(markReadAction(threadId))
+        }
+        val notification = builder.build()
         manager.notify(notificationId(threadId), notification)
     }
 
@@ -147,6 +155,26 @@ class MessageNotifier(context: Context) {
         )
         return NotificationCompat.Action.Builder(0, context.getString(R.string.notification_mark_read), pending)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)
+            .build()
+    }
+
+    /**
+     * Copy code. Only the message id travels in the intent; the receiver reads the code
+     * from the message again, so it is never copied from a message locked since. It is a
+     * contextual action, one drawn from the message text, which Android shows as a chip
+     * with its icon; plain notification buttons show text only.
+     */
+    private fun copyCodeAction(threadId: Long, messageId: Long): NotificationCompat.Action {
+        val pending = PendingIntent.getBroadcast(
+            context,
+            notificationId(threadId),
+            actionIntent(NotificationActionReceiver.ACTION_COPY_CODE, threadId)
+                .putExtra(NotificationActionReceiver.EXTRA_MESSAGE_ID, messageId),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Action.Builder(R.drawable.ic_copy, context.getString(R.string.notification_copy_code), pending)
+            .setContextual(true)
             .setShowsUserInterface(false)
             .build()
     }
