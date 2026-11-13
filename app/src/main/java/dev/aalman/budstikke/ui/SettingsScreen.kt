@@ -26,7 +26,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -55,7 +57,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.telephony.SubscriptionManager
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.settings.SEND_DELAYS
+import dev.aalman.budstikke.settings.LauncherName
+import dev.aalman.budstikke.settings.Accessibility
+import androidx.compose.foundation.selection.toggleable
 import dev.aalman.budstikke.settings.SettingsRepository
 import dev.aalman.budstikke.settings.ThemeMode
 import dev.aalman.budstikke.settings.ThemeSource
@@ -65,14 +71,15 @@ import dev.aalman.budstikke.ui.theme.parseHex
 import dev.aalman.budstikke.ui.theme.toHex
 
 /** Accents offered as swatches: BifroSSH's three, then a spread around the wheel. */
-private val accentSwatches = listOf(
+internal val accentSwatches = listOf(
     0x58A6FF, 0xA78BFA, 0x155397, 0x10B981, 0x84CC16,
     0xF59E0B, 0xEF4444, 0xEC4899, 0x06B6D4, 0x8B5CF6,
 )
 
 @Composable
 fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: () -> Unit, onBack: () -> Unit) {
-    val repository = SettingsRepository.get(LocalContext.current)
+    val context = LocalContext.current
+    val repository = SettingsRepository.get(context)
     val settings by repository.settings.collectAsState()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -96,7 +103,6 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 enabled = { it != ThemeSource.Dynamic || dynamicColourAvailable },
                 onSelect = { source -> repository.update { it.copy(themeSource = source) } },
             )
-            if (!dynamicColourAvailable) Hint(stringResource(R.string.settings_theme_dynamic_unavailable))
 
             Spacer(Modifier.height(16.dp))
             Label(stringResource(R.string.settings_mode))
@@ -113,7 +119,7 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
             Spacer(Modifier.height(12.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_true_black),
-                hint = stringResource(R.string.settings_true_black_hint),
+                hint = null,
                 checked = settings.trueBlack,
                 onCheckedChange = { on -> repository.update { it.copy(trueBlack = on) } },
             )
@@ -124,6 +130,35 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 accent = settings.accent,
                 onAccent = { accent -> repository.update { it.copy(accent = accent) } },
             )
+
+            Spacer(Modifier.height(16.dp))
+            Label(stringResource(R.string.settings_launcher_name))
+            var messagesName by remember { mutableStateOf(LauncherName.isMessages(context)) }
+            var confirmName by remember { mutableStateOf<Boolean?>(null) }
+            Choices(
+                options = listOf(false to stringResource(R.string.app_name), true to stringResource(R.string.launcher_messages)),
+                selected = messagesName,
+                onSelect = { messages -> if (messages != messagesName) confirmName = messages },
+            )
+            // Some launchers drop a home-screen icon when the name changes; say so first.
+            confirmName?.let { messages ->
+                AlertDialog(
+                    onDismissRequest = { confirmName = null },
+                    title = { Text(stringResource(R.string.settings_launcher_name)) },
+                    text = { Text(stringResource(R.string.settings_launcher_hint)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            LauncherName.set(context, messages)
+                            messagesName = messages
+                            confirmName = null
+                        }) { Text(stringResource(R.string.settings_launcher_change)) }
+                    },
+                    dismissButton = { TextButton(onClick = { confirmName = null }) { Text(stringResource(R.string.cancel)) } },
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
+            AccessibilitySection(settings.accessibility) { a11y -> repository.update { it.copy(accessibility = a11y) } }
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_sending))
@@ -143,7 +178,6 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                         }
                     }
                 }
-                Hint(stringResource(R.string.settings_sim_hint))
             }
             Spacer(Modifier.height(16.dp))
             Label(stringResource(R.string.settings_send_delay))
@@ -154,13 +188,12 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
                 selected = settings.sendDelaySeconds,
                 onSelect = { seconds -> repository.update { it.copy(sendDelaySeconds = seconds) } },
             )
-            Hint(stringResource(R.string.settings_send_delay_hint))
             Spacer(Modifier.height(12.dp))
-            LinkRow(stringResource(R.string.scheduled_title), stringResource(R.string.scheduled_hint), onShowScheduled)
+            LinkRow(stringResource(R.string.scheduled_title), onClick = onShowScheduled)
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))
-            LinkRow(stringResource(R.string.blocked_title), stringResource(R.string.settings_blocked_hint), onShowBlocked)
+            LinkRow(stringResource(R.string.blocked_title), onClick = onShowBlocked)
 
             Spacer(Modifier.height(28.dp))
             BackupSection()
@@ -219,7 +252,7 @@ private fun <T> Choices(
             val shape = RoundedCornerShape(8.dp)
             Box(
                 Modifier
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = touchTarget(48.dp))
                     .clip(shape)
                     .background(if (isSelected) accent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainer)
                     .border(
@@ -246,21 +279,58 @@ private fun <T> Choices(
 }
 
 @Composable
-private fun SwitchRow(title: String, hint: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    title: String,
+    hint: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val fade = if (enabled) 1f else 0.5f
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .clickable(role = Role.Switch) { onCheckedChange(!checked) },
+            .heightIn(min = touchTarget(56.dp))
+            .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-            Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = fade))
+            if (hint != null) Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = fade))
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
+}
+
+/** Accessibility mode's switch, with its four parts under it, usable while it is on. */
+@Composable
+private fun AccessibilitySection(a11y: Accessibility, onChange: (Accessibility) -> Unit) {
+    SectionHeading(stringResource(R.string.settings_accessibility))
+    SwitchRow(
+        stringResource(R.string.accessibility_mode),
+        stringResource(R.string.accessibility_mode_hint),
+        a11y.on,
+        { onChange(a11y.copy(on = it)) },
+    )
+    val part = Modifier.padding(start = 16.dp)
+    SwitchRow(
+        stringResource(R.string.accessibility_contrast), stringResource(R.string.accessibility_contrast_hint),
+        a11y.highContrast, { onChange(a11y.copy(highContrast = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_text), stringResource(R.string.accessibility_text_hint),
+        a11y.largerText, { onChange(a11y.copy(largerText = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_targets), stringResource(R.string.accessibility_targets_hint),
+        a11y.largerTargets, { onChange(a11y.copy(largerTargets = it)) }, part, enabled = a11y.on,
+    )
+    SwitchRow(
+        stringResource(R.string.accessibility_motion), stringResource(R.string.accessibility_motion_hint),
+        a11y.reducedMotion, { onChange(a11y.copy(reducedMotion = it)) }, part, enabled = a11y.on,
+    )
 }
 
 @Composable
@@ -268,7 +338,7 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = touchTarget(52.dp))
             .selectable(selected, role = Role.RadioButton, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -284,16 +354,17 @@ private fun RadioRow(title: String, detail: String?, selected: Boolean, onClick:
 
 /** A row that opens another page. */
 @Composable
-internal fun LinkRow(title: String, hint: String, onClick: () -> Unit) {
+internal fun LinkRow(title: String, hint: String? = null, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = touchTarget(52.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-        Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (hint != null) Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -352,7 +423,7 @@ private fun Swatch(colour: Int?, selected: Boolean, description: String, onClick
     val ring = MaterialTheme.colorScheme.onBackground
     Box(
         Modifier
-            .size(48.dp)
+            .size(touchTarget(48.dp))
             .clip(CircleShape)
             .border(if (selected) 3.dp else 1.dp, if (selected) ring else MaterialTheme.colorScheme.outline, CircleShape)
             .padding(5.dp)

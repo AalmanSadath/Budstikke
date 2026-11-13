@@ -74,7 +74,7 @@ The app can take the SMS role and does everything Android expects of the holder.
 - [x] Consecutive messages from the same side group together, with a time label between groups
       that are far apart in time.
 - [x] A newly sent or received message animates into place rather than appearing at once.
-- [ ] With reduced motion on (R20), the same message appears without animation.
+- [x] With reduced motion on (R20), the same message appears without animation.
 
 ## R7. Backup and restore, PIN-encrypted
 
@@ -191,14 +191,14 @@ The app can take the SMS role and does everything Android expects of the holder.
 
 A single "Accessibility mode" switch in settings, with its parts adjustable.
 
-- [ ] With TalkBack on, every button, avatar, bubble and status icon is read with a useful
+- [x] With TalkBack on, every button, avatar, bubble and status icon is read with a useful
       description ("Message from Dad, 4:45 PM, It is on the kitchen table").
-- [ ] High-contrast theme: text and controls meet at least 7:1 contrast against their
+- [x] High-contrast theme: text and controls meet at least 7:1 contrast against their
       background.
-- [ ] Larger text: message and list text scale beyond the system font size setting, and
+- [x] Larger text: message and list text scale beyond the system font size setting, and
       nothing is cut off.
-- [ ] Larger touch targets: every tappable control is at least 56 dp.
-- [ ] Reduced motion: no bubble, list or screen-change animation plays.
+- [x] Larger touch targets: every tappable control is at least 56 dp.
+- [x] Reduced motion: no bubble, list or screen-change animation plays.
 
 ## R21. Message import
 
@@ -211,21 +211,20 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 
 ## R22. Colours and themes
 
-- [ ] Theme choices: Dynamic (Material 3 colours from the wallpaper, Android 12 and later),
+- [x] Theme choices: Dynamic (Material 3 colours from the wallpaper, Android 12 and later),
       BifroSSH dark, BifroSSH light, BifroSSH AMOLED (true black).
-- [ ] Each choice can follow the system's light or dark mode or be fixed by hand.
-- [ ] An accent colour can be picked in either Dynamic or BifroSSH themes, replacing the
+- [x] Each choice can follow the system's light or dark mode or be fixed by hand.
+- [x] An accent colour can be picked in either Dynamic or BifroSSH themes, replacing the
       accent everywhere it shows.
-- [ ] Text on accent and danger colours stays readable in every theme (at least 4.5:1).
-- [ ] Changing theme applies at once, without restarting.
+- [x] Text on accent and danger colours stays readable in every theme (at least 4.5:1).
+- [x] Changing theme applies at once, without restarting.
 
 ## R23. Launcher name
 
-- [ ] By default the name under the app icon is "Budstikke".
-- [ ] A setting changes it to "Messages"; after the change, the app drawer shows "Messages".
-- [ ] Open question: what the switch does to an icon already placed on the home screen (it may
-      be removed or need re-adding on some launchers). Decide and state it in the setting's
-      description.
+- [x] By default the name under the app icon is "Budstikke".
+- [x] A setting changes it to "Messages"; after the change, the app drawer shows "Messages".
+- [x] Switching asks first, saying that some launchers remove an icon already placed on the
+      home screen when the name changes, and that it can be added again from the app drawer.
 
 ## R24. No network access
 

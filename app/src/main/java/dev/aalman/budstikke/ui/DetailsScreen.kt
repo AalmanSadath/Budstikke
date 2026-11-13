@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.Flags
 
@@ -116,7 +117,7 @@ private fun ActionRow(icon: Int, label: String, danger: Boolean = false, onClick
             .fillMaxWidth()
             .card()
             .clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = 52.dp)
+            .heightIn(min = touchTarget(52.dp))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

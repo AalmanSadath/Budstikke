@@ -46,12 +46,32 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- The icon in the app drawer, under one of two names. Exactly one of these is
+             enabled at a time; Settings switches between them (LauncherName.kt). -->
+        <activity-alias
+            android:name=".LauncherBudstikke"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherMessages"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_messages"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- The compose screen the SMS role requires: opened by sms: and smsto: links. -->
         <activity

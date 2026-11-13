@@ -1,9 +1,7 @@
 package dev.aalman.budstikke.ui
 
-import android.provider.Settings
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
+import dev.aalman.budstikke.ui.theme.LocalReducedMotion
 import dev.aalman.budstikke.data.Message
 import java.util.concurrent.TimeUnit
 
@@ -27,14 +25,6 @@ fun bubblePlaces(messages: List<Message>): List<BubblePlace> {
     return messages.indices.map { i -> BubblePlace(labels[i], joined[i], joined.getOrElse(i + 1) { false }) }
 }
 
-/**
- * Whether motion is turned down: for now, animations switched off in the system's
- * developer or accessibility settings. Accessibility mode's own switch joins it later.
- */
+/** Whether motion is turned down: accessibility mode's reduced motion, or animations off in the system. */
 @Composable
-fun rememberReducedMotion(): Boolean {
-    val resolver = LocalContext.current.contentResolver
-    return remember(resolver) {
-        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
-}
+fun rememberReducedMotion(): Boolean = LocalReducedMotion.current

@@ -9,6 +9,19 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.LocalActivity
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import android.provider.Settings
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
@@ -125,8 +138,57 @@ fun BudstikkeTheme(content: @Composable () -> Unit) {
     // BifroSSH's AMOLED palette is already black; dynamic colour needs its surfaces taken there.
     if (dark && settings.trueBlack && scheme !== BifrosshAmoled) scheme = scheme.trueBlack()
     settings.accent?.let { scheme = scheme.withAccent(it) }
-    MaterialTheme(colorScheme = scheme, content = content)
+    val a11y = settings.accessibility
+    if (a11y.useHighContrast) scheme = scheme.highContrast(dark)
+    val resolver = context.contentResolver
+    // Animations off in the system's settings count as reduced motion too.
+    val systemNoMotion = remember(resolver) {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val density = LocalDensity.current
+    // The status and navigation bar icons follow the app's light or dark, which can be set by
+    // hand apart from the system's; otherwise dark icons can sit on a dark app.
+    val activity = LocalActivity.current
+    val view = LocalView.current
+    SideEffect {
+        val window = activity?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+    CompositionLocalProvider(
+        LocalHighContrast provides a11y.useHighContrast,
+        LocalReducedMotion provides (a11y.useReducedMotion || systemNoMotion),
+        // Beyond the system's own text size: every sp is this much larger again.
+        LocalDensity provides if (a11y.useLargerText) Density(density.density, density.fontScale * LARGER_TEXT) else density,
+        LocalMinimumInteractiveComponentSize provides if (a11y.useLargerTargets) LARGE_TARGET else DEFAULT_TARGET,
+    ) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }
+
+/** How much accessibility mode's larger text scales text beyond the system's text size. */
+const val LARGER_TEXT = 1.3f
+
+/** Material's own minimum touch target, and accessibility mode's larger one. */
+val DEFAULT_TARGET = 48.dp
+val LARGE_TARGET = 56.dp
+
+/** Whether accessibility mode's high contrast is on, for shapes that need an outline to stand out. */
+val LocalHighContrast = staticCompositionLocalOf { false }
+
+/** Whether animations should be left out: accessibility mode's reduced motion, or animations off in the system. */
+val LocalReducedMotion = staticCompositionLocalOf { false }
+
+/**
+ * The size of a tappable control drawn at [base]: [base] itself, or at least [LARGE_TARGET]
+ * when accessibility mode asks for larger touch targets. Material's own controls follow
+ * [LocalMinimumInteractiveComponentSize] by themselves; this is for the app's own.
+ */
+@Composable
+fun touchTarget(base: Dp): Dp =
+    if (LocalMinimumInteractiveComponentSize.current >= LARGE_TARGET) maxOf(base, LARGE_TARGET) else base
 
 private fun ColorScheme.trueBlack(): ColorScheme = copy(
     background = Color.Black,
@@ -139,9 +201,11 @@ private fun ColorScheme.trueBlack(): ColorScheme = copy(
 )
 
 /** Replaces the accent roles with a chosen colour and the text colour that reads on it. */
-private fun ColorScheme.withAccent(rgb: Int): ColorScheme {
-    val accent = Color(0xFF000000 or rgb.toLong())
+internal fun ColorScheme.withAccent(rgb: Int): ColorScheme {
     val on = Color(0xFF000000 or onAccent(rgb).toLong())
+    // A mid accent may fall just short of 4.5:1 with either text colour; take it a little
+    // further from its text until it reads.
+    val accent = strengthen(Color(0xFF000000 or rgb.toLong()), if (on == Color.White) Color.Black else Color.White, listOf(on), NORMAL_CONTRAST)
     val shade = Color(0xFF000000 or accentShade(rgb).toLong())
     return copy(
         primary = accent,

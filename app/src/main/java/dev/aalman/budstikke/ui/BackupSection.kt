@@ -84,11 +84,11 @@ fun BackupSection() {
     }
 
     SectionHeading(stringResource(R.string.settings_backup))
-    LinkRow(stringResource(R.string.backup_messages), stringResource(R.string.backup_messages_hint)) { pinFor = PinFor.Backup }
-    LinkRow(stringResource(R.string.restore_backup), stringResource(R.string.restore_backup_hint)) {
+    LinkRow(stringResource(R.string.backup_messages)) { pinFor = PinFor.Backup }
+    LinkRow(stringResource(R.string.restore_backup)) {
         openFile.launch(arrayOf("*/*"))
     }
-    LinkRow(stringResource(R.string.import_messages), stringResource(R.string.import_messages_hint)) { choosingSource = true }
+    LinkRow(stringResource(R.string.import_messages)) { choosingSource = true }
     if (choosingSource) {
         SourceDialog(
             onDismiss = { choosingSource = false },
