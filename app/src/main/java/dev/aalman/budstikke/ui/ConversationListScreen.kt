@@ -99,7 +99,6 @@ fun ConversationListScreen(
                     BarAction(R.drawable.ic_close, R.string.clear_selection) { selected = emptySet() }
                 },
                 items = listOfNotNull(
-                    // Left of the rest, so adding it moves none of the buttons that were there.
                     BarItem(R.drawable.ic_block, R.string.block_number) {
                         onBlock(chosen)
                         selected = emptySet()
@@ -115,10 +114,8 @@ fun ConversationListScreen(
                         onDelete(chosen)
                         selected = emptySet()
                     },
-                    // Pin takes the settings button's place, so archive and delete sit where
-                    // Archived and Trash were and nothing moves when selecting starts. Pin
-                    // unless every selected row is pinned already, as other mail and message
-                    // apps do with a mixed selection.
+                    // Pin unless every selected row is pinned already, as other mail and
+                    // message apps do with a mixed selection. The archive has no pins.
                     if (archive) {
                         null
                     } else {
@@ -134,13 +131,13 @@ fun ConversationListScreen(
             TopBar(
                 stringResource(if (archive) R.string.archived else R.string.app_name),
                 onBack = onBack,
-                // Search leftmost, so the buttons selecting puts in their places line up as before.
+                // Search is the one button; the other pages open from the menu beside it.
                 items = listOfNotNull(
                     onSearch?.let { BarItem(R.drawable.ic_search, R.string.search, onClick = it) },
-                    onShowStarred?.let { BarItem(R.drawable.ic_star_outline, R.string.starred, onClick = it) },
-                    onShowArchive?.let { BarItem(R.drawable.ic_archive, R.string.archived, onClick = it) },
-                    onShowTrash?.let { BarItem(R.drawable.ic_delete, R.string.trash, onClick = it) },
-                    onSettings?.let { BarItem(R.drawable.ic_settings, R.string.settings, onClick = it) },
+                    onShowStarred?.let { BarItem(R.drawable.ic_star_outline, R.string.starred, inMenu = true, onClick = it) },
+                    onShowArchive?.let { BarItem(R.drawable.ic_archive, R.string.archived, inMenu = true, onClick = it) },
+                    onShowTrash?.let { BarItem(R.drawable.ic_delete, R.string.trash, inMenu = true, onClick = it) },
+                    onSettings?.let { BarItem(R.drawable.ic_settings, R.string.settings, inMenu = true, onClick = it) },
                 ),
             )
         }
