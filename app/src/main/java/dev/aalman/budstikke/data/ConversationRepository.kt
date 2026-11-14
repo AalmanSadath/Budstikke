@@ -2,6 +2,7 @@ package dev.aalman.budstikke.data
 
 import android.content.Context
 import android.provider.Telephony
+import dev.aalman.budstikke.sms.isSentReaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
@@ -151,6 +152,8 @@ class ConversationRepository(context: Context) {
         )
         val lockState = locks.state()
         val withLocked = HashSet<Long>()
+        // A thread's newest sent reaction, for a thread that holds nothing else.
+        val fallback = HashMap<Long, Conversation>()
         val cursor = resolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
@@ -175,27 +178,36 @@ class ConversationRepository(context: Context) {
                 if (isInbox && c.getInt(read) == 0) {
                     unread[threadId] = (unread[threadId] ?: 0) + 1
                 }
-                if (threadId !in latest) {
-                    latest[threadId] = Conversation(
-                        threadId = threadId,
-                        address = c.getString(address).orEmpty(),
-                        snippet = c.getString(body).orEmpty(),
-                        dateMillis = c.getLong(date),
-                        lastFromMe = !isInbox,
-                        unreadCount = 0,
-                        snippetLocked = messageLocked,
-                        subscriptionId = c.getInt(sub),
-                    )
+                if (threadId in latest) continue
+                val text = c.getString(body).orEmpty()
+                val row = Conversation(
+                    threadId = threadId,
+                    address = c.getString(address).orEmpty(),
+                    snippet = text,
+                    dateMillis = c.getLong(date),
+                    lastFromMe = !isInbox,
+                    unreadCount = 0,
+                    snippetLocked = messageLocked,
+                    subscriptionId = c.getInt(sub),
+                )
+                // A reaction sent from here is folded into its message in the conversation,
+                // so the list shows the message before it instead.
+                val failed = c.getInt(type) == Telephony.Sms.MESSAGE_TYPE_FAILED
+                if (isSentReaction(text, outgoing = !isInbox, failed = failed)) {
+                    fallback.putIfAbsent(threadId, row)
+                } else {
+                    latest[threadId] = row
                 }
             }
         }
+        fallback.forEach { (threadId, row) -> latest.putIfAbsent(threadId, row) }
         flags.forgetAllBut(latest.keys)
         drafts.forgetAllBut(latest.keys)
         locks.forgetThreadsBut(latest.keys)
         val allFlags = flags.all()
         val allDrafts = drafts.all()
-        // Rows come newest first, so insertion order is already date order.
-        return latest.values.map {
+        // Skipped reactions can leave a thread dated before others, so sort, newest first.
+        return latest.values.sortedByDescending { it.dateMillis }.map {
             it.copy(
                 unreadCount = unread[it.threadId] ?: 0,
                 contact = contacts.lookup(it.address),

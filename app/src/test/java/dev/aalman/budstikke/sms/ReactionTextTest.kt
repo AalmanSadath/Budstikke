@@ -113,6 +113,15 @@ class ReactionTextTest {
     }
 
     @Test
+    fun onlySentReactionsLeaveTheListSnippet() {
+        val reaction = "Reacted 👍 to \"Best. See you soon!\""
+        assertTrue(isSentReaction(reaction, outgoing = true, failed = false))
+        assertFalse(isSentReaction(reaction, outgoing = false, failed = false))
+        assertFalse(isSentReaction(reaction, outgoing = true, failed = true))
+        assertFalse(isSentReaction("Best. See you soon!", outgoing = true, failed = false))
+    }
+
+    @Test
     fun sendsReactionsOnlyToPhoneNumbers() {
         assertTrue(canSendReactionTo("+47 412 34 567"))
         assertTrue(canSendReactionTo("0412345678"))
