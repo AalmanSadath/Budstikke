@@ -1,0 +1,27 @@
+<!--
+  The message bubble from the app logo, on the 108 dp adaptive icon canvas. The logo's
+  512 unit artwork is scaled down to sit inside the 66 dp circle every launcher mask keeps.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.72"
+        android:scaleY="0.72">
+        <path
+            android:pathData="M130,130H362Q392,130 392,160V330L410,384L352,360H130Q100,360 100,330V160Q100,130 130,130Z"
+            android:strokeWidth="30"
+            android:strokeColor="#5AB4E5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M160,200H332M160,250H320M160,300H260"
+            android:strokeWidth="24"
+            android:strokeColor="#5AB4E5"
+            android:strokeLineCap="round" />
+    </group>
+</vector>
