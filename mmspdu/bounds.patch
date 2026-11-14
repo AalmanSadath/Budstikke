@@ -1,0 +1,35 @@
+--- a/mmspdu/src/main/java/dev/aalman/budstikke/mms/pdu/PduParser.java
++++ b/mmspdu/src/main/java/dev/aalman/budstikke/mms/pdu/PduParser.java
+@@ -896,6 +896,10 @@
+             }
+ 
+             /* get part's data */
++            // Budstikke: refuse a part longer than the data left, before allocating it.
++            if (dataLength < 0 || dataLength > pduDataStream.available()) {
++                return null;
++            }
+             if (dataLength > 0) {
+                 byte[] partData = new byte[dataLength];
+                 String partContentType = new String(part.getContentType());
+@@ -1320,6 +1324,10 @@
+      */
+     protected static int skipWapValue(ByteArrayInputStream pduDataStream, int length) {
+         assert(null != pduDataStream);
++        // Budstikke: refuse to skip more than the data left, before allocating it.
++        if (length < 0 || length > pduDataStream.available()) {
++            return -1;
++        }
+         byte[] area = new byte[length];
+         int readLen = pduDataStream.read(area, 0, length);
+         if (readLen < length) { //The actually read length is lower than the length
+@@ -1703,6 +1711,10 @@
+                                 thisEndPos = pduDataStream.available();
+                                 if (thisStartPos - thisEndPos < len) {
+                                     int last = len - (thisStartPos - thisEndPos);
++                                    // Budstikke: refuse to skip more than the data left.
++                                    if (last > pduDataStream.available()) {
++                                        return false;
++                                    }
+                                     byte[] temp = new byte[last];
+                                     pduDataStream.read(temp, 0, last);
+                                 }

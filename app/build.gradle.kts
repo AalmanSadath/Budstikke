@@ -55,9 +55,18 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // The MMS PDU code logs through android.util.Log on bad input; in plain JVM tests those
+    // stubs return nothing instead of throwing. Its Java `assert`s never run on Android, so
+    // they are off here too. Both keep the parser running as it does on a phone.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.all { it.jvmArgs("-da:dev.aalman.budstikke.mms...") }
+    }
 }
 
 dependencies {
+    implementation(project(":mmspdu"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
