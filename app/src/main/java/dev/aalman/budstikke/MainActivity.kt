@@ -1,6 +1,8 @@
 package dev.aalman.budstikke
 
 import kotlinx.coroutines.flow.combine
+import dev.aalman.budstikke.data.DownloadState
+import dev.aalman.budstikke.sms.MmsDownloader
 import dev.aalman.budstikke.data.Marks
 import dev.aalman.budstikke.data.MarkState
 import dev.aalman.budstikke.data.StarredMessage
@@ -585,7 +587,16 @@ private fun ConversationRoute(
                 }
             }
         },
-        onRetry = { message -> scope.launch(Dispatchers.IO) { sender.retry(message.id) } },
+        onRetry = { message ->
+            // Sending MMS comes with the compose bar's attachments; until then only SMS retry.
+            if (!message.isMms) scope.launch(Dispatchers.IO) { sender.retry(message.id) }
+        },
+        onDownload = { message ->
+            val waiting = message.waiting
+            if (waiting != null && waiting.download != DownloadState.Downloading) {
+                scope.launch(Dispatchers.IO) { MmsDownloader.start(context, waiting.rowId) }
+            }
+        },
         pending = pending,
         onSchedule = { if (text.isNotBlank()) picker = SchedulePick(null) },
         onPendingAction = { message, action ->

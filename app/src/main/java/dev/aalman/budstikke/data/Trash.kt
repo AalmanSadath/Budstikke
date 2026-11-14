@@ -1,8 +1,15 @@
 package dev.aalman.budstikke.data
 
+import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.provider.Telephony
+import dev.aalman.budstikke.R
+import dev.aalman.budstikke.sms.MmsRecord
+import dev.aalman.budstikke.sms.MmsRecordJson
+import dev.aalman.budstikke.sms.MmsStore
+import org.json.JSONObject
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,18 +39,23 @@ data class TrashItem(
 val KEEP_MILLIS: Long = TimeUnit.DAYS.toMillis(30)
 
 /**
- * Deleting takes SMS out of the system store and keeps copies here, so other apps no longer
- * see them while they can still be restored for [KEEP_MILLIS]. Restoring writes them back
- * with their original dates; the store files them into a thread by address again.
+ * Deleting takes messages out of the system store and keeps copies here, so other apps no
+ * longer see them while they can still be restored for [KEEP_MILLIS]. Restoring writes them
+ * back with their original dates; the store files them into a thread by address again. An
+ * SMS is kept as a row; an MMS, with its attachments, as a file named by its row.
  */
 class Trash private constructor(context: Context) {
 
-    private val resolver = context.applicationContext.contentResolver
+    private val app = context.applicationContext
+    private val resolver = app.contentResolver
     private val db = AppDatabase.get(context)
     private val flags = ConversationFlags.get(context)
     private val contacts = ContactRepository.get(context)
     private val locks = Locks.get(context)
     private val marks = Marks.get(context)
+    private val mmsStore = MmsStore(context)
+    private val downloads = MmsDownloads.get(context)
+    private val files = File(context.applicationContext.filesDir, "trash")
     private val version = MutableStateFlow(0)
 
     /** The trash, newest deletion first, reloaded after every change. */
@@ -61,24 +73,32 @@ class Trash private constructor(context: Context) {
             move(
                 address, "${Telephony.Sms.THREAD_ID} = ?", arrayOf(threadId.toString()), true, f,
                 threadLocked = threadId in lockState.threads, lockedMessages = lockState.messages, marks = markState,
-            )?.also { locks.setThreadLocked(threadId, false) }
+                mmsIds = mmsInThread(threadId),
+            )?.also {
+                locks.setThreadLocked(threadId, false)
+                // Delivery and read reports are rows of the thread too; they are not kept.
+                resolver.delete(Telephony.Mms.CONTENT_URI, "${Telephony.Mms.THREAD_ID} = ?", arrayOf(threadId.toString()))
+            }
         }
         version.update { it + 1 }
         return ids
     }
 
-    /** Moves the given messages of one conversation to the trash as one item. */
+    /** Moves the given messages of one conversation, by [MessageKey], to the trash as one item. */
     fun deleteMessages(address: String, messageIds: Collection<Long>): Long? {
         if (messageIds.isEmpty()) return null
+        val (mms, sms) = messageIds.partition(MessageKey::isMms)
         val id = move(
             address,
-            "${Telephony.Sms._ID} IN (${messageIds.joinToString(",") { "?" }})",
-            messageIds.map { it.toString() }.toTypedArray(),
+            // Only MMS picked out leaves no SMS to match.
+            if (sms.isEmpty()) "0 = 1" else "${Telephony.Sms._ID} IN (${sms.joinToString(",") { "?" }})",
+            sms.map { it.toString() }.toTypedArray(),
             false,
             Flags(),
             threadLocked = false,
             lockedMessages = locks.state().messages,
             marks = marks.state(),
+            mmsIds = mms.map(MessageKey::mmsRowId),
         )
         version.update { it + 1 }
         return id
@@ -105,10 +125,20 @@ class Trash private constructor(context: Context) {
             val react = HashMap<Long, String>()
             sql.query(
                 "trash_messages",
-                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id", "locked", "starred", "reaction"),
+                arrayOf("address", "body", "date", "date_sent", "type", "read", "seen", "status", "sub_id", "locked", "starred", "reaction", "mms_file"),
                 "item_id = ?", arrayOf(itemId.toString()), null, null, "date ASC",
             ).use { c ->
                 while (c.moveToNext()) {
+                    if (!c.isNull(12)) {
+                        val record = runCatching { MmsRecordJson.read(JSONObject(File(files, c.getString(12)).readText())) }.getOrNull()
+                        val newRow = record?.let(mmsStore::insert) ?: continue
+                        val newKey = MessageKey.mms(newRow)
+                        if (c.getInt(9) != 0) relock += newKey
+                        if (c.getInt(10) != 0) restar += newKey
+                        if (!c.isNull(11)) react[newKey] = c.getString(11)
+                        if (threadId == null) threadId = mmsStore.threadOf(newRow)
+                        continue
+                    }
                     val values = ContentValues().apply {
                         put(Telephony.Sms.ADDRESS, c.getString(0))
                         put(Telephony.Sms.BODY, c.getString(1))
@@ -144,6 +174,7 @@ class Trash private constructor(context: Context) {
             marks.setStarred(restar, true)
             react.forEach { (id, emoji) -> marks.setReaction(id, emoji) }
             sql.delete("trash_items", "id = ?", arrayOf(itemId.toString()))
+            deleteFiles(listOf(itemId))
         }
         version.update { it + 1 }
     }
@@ -151,21 +182,44 @@ class Trash private constructor(context: Context) {
     fun deleteForever(itemIds: Collection<Long>) {
         val sql = db.writableDatabase
         itemIds.forEach { sql.delete("trash_items", "id = ?", arrayOf(it.toString())) }
+        deleteFiles(itemIds)
         version.update { it + 1 }
     }
 
     fun empty() {
         db.writableDatabase.delete("trash_items", null, null)
+        files.deleteRecursively()
         version.update { it + 1 }
     }
 
     /** Removes deletions older than [KEEP_MILLIS]. */
     fun purgeExpired(now: Long = System.currentTimeMillis()) {
-        val removed = db.writableDatabase.delete(
-            "trash_items", "deleted_at < ?", arrayOf((now - KEEP_MILLIS).toString()),
-        )
+        val cutoff = arrayOf((now - KEEP_MILLIS).toString())
+        val expired = db.readableDatabase.query("trash_items", arrayOf("id"), "deleted_at < ?", cutoff, null, null, null)
+            .use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
+        val removed = db.writableDatabase.delete("trash_items", "deleted_at < ?", cutoff)
+        deleteFiles(expired)
         if (removed > 0) version.update { it + 1 }
     }
+
+    /** An item's MMS files live in a folder named by the item. */
+    private fun deleteFiles(itemIds: Collection<Long>) {
+        itemIds.forEach { File(files, it.toString()).deleteRecursively() }
+    }
+
+    private fun mmsPreview(record: MmsRecord): String {
+        val text = record.parts.mapNotNull { it.text }.joinToString(" ").trim()
+        if (text.isNotEmpty()) return text
+        val first = record.parts.firstOrNull { it.text == null && it.contentType != MmsStore.SMIL }
+            ?: return app.getString(R.string.mms_waiting)
+        return app.getString(attachmentLabel(Attachment(android.net.Uri.EMPTY, first.contentType, null).kind))
+    }
+
+    private fun mmsInThread(threadId: Long): List<Long> = resolver.query(
+        Telephony.Mms.CONTENT_URI, arrayOf(Telephony.Mms._ID),
+        "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.MESSAGE_BOX} != ${Telephony.Mms.MESSAGE_BOX_DRAFTS}",
+        arrayOf(threadId.toString()), null,
+    )?.use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } } ?: emptyList()
 
     /**
      * Copies the matching SMS into a new trash item, then deletes exactly the copied rows
@@ -180,9 +234,11 @@ class Trash private constructor(context: Context) {
         threadLocked: Boolean,
         lockedMessages: Set<Long>,
         marks: MarkState,
+        mmsIds: List<Long> = emptyList(),
     ): Long? {
         val sql = db.writableDatabase
         val copied = ArrayList<Long>()
+        val copiedMms = ArrayList<Long>()
         sql.beginTransaction()
         val itemId: Long
         try {
@@ -223,15 +279,45 @@ class Trash private constructor(context: Context) {
                     })
                 }
             }
-            if (copied.isEmpty()) return null
+            for (rowId in mmsIds) {
+                val record = mmsStore.read(rowId) ?: continue
+                val key = MessageKey.mms(rowId)
+                val name = "$itemId/$rowId.json"
+                File(files, name).apply { parentFile?.mkdirs() }.writeText(MmsRecordJson.write(record).toString())
+                copiedMms += rowId
+                sql.insertOrThrow("trash_messages", null, ContentValues().apply {
+                    put("item_id", itemId)
+                    put("address", record.others.firstOrNull() ?: address)
+                    // A picture message without text shows as what it carries, as in the list.
+                    put("body", mmsPreview(record))
+                    put("date", record.dateSeconds * 1000)
+                    put("date_sent", record.dateSentSeconds * 1000)
+                    put("type", record.box)
+                    put("read", if (record.read) 1 else 0)
+                    put("seen", if (record.seen) 1 else 0)
+                    put("status", 0)
+                    put("sub_id", record.subscriptionId)
+                    put("locked", if (key in lockedMessages) 1 else 0)
+                    put("starred", if (key in marks.starred) 1 else 0)
+                    put("reaction", marks.reactions[key])
+                    put("mms_file", name)
+                })
+            }
+            if (copied.isEmpty() && copiedMms.isEmpty()) {
+                File(files, itemId.toString()).deleteRecursively()
+                return null
+            }
             sql.setTransactionSuccessful()
         } finally {
             sql.endTransaction()
         }
         // The copies, with their locks and marks, are committed before anything leaves the
         // system store; the locks and marks on the old ids go with them.
-        locks.setMessagesLocked(copied.filter { it in lockedMessages }, false)
-        this.marks.forget(copied.filter { it in marks.starred || it in marks.reactions })
+        val keys = copied + copiedMms.map(MessageKey::mms)
+        locks.setMessagesLocked(keys.filter { it in lockedMessages }, false)
+        this.marks.forget(keys.filter { it in marks.starred || it in marks.reactions })
+        mmsStore.delete(copiedMms)
+        downloads.forget(copiedMms)
         copied.chunked(500).forEach { chunk ->
             resolver.delete(
                 Telephony.Sms.CONTENT_URI,
@@ -272,6 +358,8 @@ class Trash private constructor(context: Context) {
     }
 
     companion object {
+        // Holds only the application context, which lives as long as the process anyway.
+        @SuppressLint("StaticFieldLeak")
         @Volatile
         private var instance: Trash? = null
 

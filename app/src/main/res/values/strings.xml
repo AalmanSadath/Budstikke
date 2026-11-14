@@ -245,4 +245,22 @@
     <string name="settings_launcher_hint">This changes the name in the app drawer. Some launchers remove the icon from the home screen when the name changes; add it again from the app drawer.</string>
     <string name="settings_launcher_change">Change name</string>
     <string name="scheduled_hint">Messages waiting to go out, soonest first</string>
+    <!-- MMS -->
+    <string name="mms_waiting">Multimedia message</string>
+    <string name="attachment_photo">Photo</string>
+    <string name="attachment_video">Video</string>
+    <string name="attachment_audio">Audio</string>
+    <string name="attachment_contact">Contact card</string>
+    <string name="attachment_file">Attachment</string>
+    <string name="mms_download">Download</string>
+    <string name="mms_download_size">Download (%1$s)</string>
+    <string name="mms_downloading">Downloading…</string>
+    <string name="mms_download_failed">Couldn\'t download. Tap to try again.</string>
+    <string name="mms_waiting_description">Multimedia message, not downloaded yet</string>
+    <string name="attachment_open_none">No app here can open this</string>
+    <string name="photo_viewer_close">Close</string>
+    <string name="settings_mms_auto">Download MMS automatically</string>
+    <string name="settings_mms_auto_summary">Pictures and other attachments are fetched as they arrive</string>
+    <string name="settings_mms_roaming">Also while roaming</string>
+    <string name="settings_mms_roaming_summary">Mobile data abroad can cost more</string>
 </resources>

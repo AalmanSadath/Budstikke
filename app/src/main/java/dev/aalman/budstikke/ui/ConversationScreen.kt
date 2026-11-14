@@ -77,6 +77,8 @@ import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.ui.theme.LocalHighContrast
 import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.Message
+import dev.aalman.budstikke.data.Attachment
+import dev.aalman.budstikke.data.attachmentLabel
 import dev.aalman.budstikke.data.MessageState
 import dev.aalman.budstikke.sms.Sim
 import dev.aalman.budstikke.sms.REACTION_EMOJI
@@ -148,7 +150,12 @@ fun ConversationScreen(
     onCopy: (List<Message>) -> Unit = {},
     onForward: (Message) -> Unit = {},
     onStar: (Set<Long>, Boolean) -> Unit = { _, _ -> },
+    /** Fetches an MMS still waiting at the carrier. */
+    onDownload: (Message) -> Unit = {},
 ) {
+    // The picture opened from a bubble, over the whole screen.
+    var viewing by remember { mutableStateOf<Attachment?>(null) }
+    viewing?.let { PhotoViewer(it) { viewing = null } }
     // Reactions that came, or went out, as texts are drawn on the message they quote
     // rather than as messages of their own.
     val folded = remember(messages) { foldReactions(messages) }
@@ -324,12 +331,15 @@ fun ConversationScreen(
                                 barFor != null -> selected = emptySet()
                                 selecting -> toggle()
                                 message.id in locks.messages && !unlocked -> onUnlock {}
+                                message.waiting != null -> onDownload(message)
                                 message.state == MessageState.Failed -> onRetry(message)
                             }
                         },
                         onLongClick = toggle,
                         place = place,
                         sender = contact?.name ?: address,
+                        onDownload = { if (!selecting) onDownload(message) },
+                        onOpenImage = { if (selecting) toggle() else viewing = it },
                     )
                 }
             }
@@ -484,6 +494,8 @@ private fun Bubble(
     onLongClick: () -> Unit,
     place: BubblePlace,
     sender: String,
+    onDownload: () -> Unit = {},
+    onOpenImage: (Attachment) -> Unit = {},
 ) {
     val context = LocalContext.current
     val outgoing = message.isOutgoing
@@ -498,7 +510,12 @@ private fun Bubble(
         MessageState.Failed -> stringResource(R.string.state_failed)
     }
     // A locked message keeps its text out of the bubble and out of TalkBack until unlocked.
-    val body = if (hidden) stringResource(R.string.locked_message) else message.body
+    val attachmentWords = message.attachments.map { stringResource(attachmentLabel(it.kind)) }
+    val body = when {
+        hidden -> stringResource(R.string.locked_message)
+        message.waiting != null -> stringResource(R.string.mms_waiting_description)
+        else -> (attachmentWords + message.body).filter { it.isNotEmpty() }.joinToString(". ")
+    }
     val reactions = listOfNotNull(
         mine?.let { stringResource(R.string.reaction_yours, it) },
         theirs?.let { stringResource(R.string.reaction_theirs, it) },
@@ -587,7 +604,16 @@ private fun Bubble(
                 Modifier.fillMaxWidth(0.8f),
                 horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
             ) {
-                Text(
+                // An MMS shows its pictures and files above its text; one still at the
+                // carrier shows only what it is and how to fetch it.
+                val waiting = message.waiting
+                if (waiting != null && !hidden) {
+                    WaitingContent(waiting, onDownload)
+                } else if (message.attachments.isNotEmpty() && !hidden) {
+                    AttachmentsContent(message.attachments, outgoing, onOpenImage, onLongClick)
+                    if (message.body.isNotEmpty()) Spacer(Modifier.size(4.dp))
+                }
+                if (hidden || (waiting == null && (message.body.isNotEmpty() || message.attachments.isEmpty()))) Text(
                     shown,
                     Modifier
                         // In high contrast a received bubble is outlined: its fill is close to the page.

@@ -198,6 +198,21 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
             )
             Spacer(Modifier.height(12.dp))
             LinkRow(stringResource(R.string.scheduled_title), onClick = onShowScheduled)
+            Spacer(Modifier.height(12.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_mms_auto),
+                hint = stringResource(R.string.settings_mms_auto_summary),
+                checked = settings.autoDownloadMms,
+                onCheckedChange = { on -> repository.update { it.copy(autoDownloadMms = on) } },
+            )
+            if (settings.autoDownloadMms) {
+                SwitchRow(
+                    title = stringResource(R.string.settings_mms_roaming),
+                    hint = stringResource(R.string.settings_mms_roaming_summary),
+                    checked = settings.autoDownloadMmsRoaming,
+                    onCheckedChange = { on -> repository.update { it.copy(autoDownloadMmsRoaming = on) } },
+                )
+            }
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))

@@ -19,6 +19,9 @@ import dev.aalman.budstikke.MainActivity
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.ContactRepository
 import dev.aalman.budstikke.data.Locks
+import dev.aalman.budstikke.data.MessageKey
+import dev.aalman.budstikke.data.MmsReader
+import dev.aalman.budstikke.data.attachmentLabel
 
 /**
  * One notification per conversation, listing its unread messages. It is rebuilt from the
@@ -201,7 +204,19 @@ class MessageNotifier(context: Context) {
                 rows += Unread(c.getLong(3), c.getString(0).orEmpty(), c.getString(1).orEmpty(), c.getLong(2))
             }
         }
-        return rows.asReversed()
+        // MMS have no address of their own row; who sent each is in its address table.
+        val mms = MmsReader(context.contentResolver).summaries(
+            "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.READ} = 0 AND ${Telephony.Mms.MESSAGE_BOX} = ${Telephony.Mms.MESSAGE_BOX_INBOX}",
+            arrayOf(threadId.toString()),
+        ).take(MAX_LINES).map { m ->
+            val body = when {
+                m.waiting -> context.getString(R.string.mms_waiting)
+                m.text.isNotEmpty() -> m.text
+                else -> context.getString(attachmentLabel(m.attachment))
+            }
+            Unread(m.key, MmsReader(context.contentResolver).sender(MessageKey.mmsRowId(m.key)) ?: rows.firstOrNull()?.address.orEmpty(), body, m.dateMillis)
+        }
+        return (rows + mms).sortedBy { it.dateMillis }.takeLast(MAX_LINES)
     }
 
     companion object {

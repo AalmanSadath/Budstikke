@@ -26,6 +26,10 @@ data class Settings(
     val sendDelaySeconds: Int = 0,
     /** A SIM badge beside each conversation's name, when more than one SIM is active. */
     val showSimBadge: Boolean = false,
+    /** Incoming MMS are fetched as they arrive; when off, each waits for a tap on Download. */
+    val autoDownloadMms: Boolean = true,
+    /** Fetches them while roaming too, where mobile data can cost more. */
+    val autoDownloadMmsRoaming: Boolean = false,
     /** Accessibility mode, with each of its parts that can be turned off on its own. */
     val accessibility: Accessibility = Accessibility(),
 )
@@ -72,6 +76,8 @@ class SettingsRepository private constructor(context: Context) {
             putInt(KEY_SUBSCRIPTION, next.defaultSubscriptionId)
             putInt(KEY_SEND_DELAY, next.sendDelaySeconds)
             putBoolean(KEY_SIM_BADGE, next.showSimBadge)
+            putBoolean(KEY_MMS_AUTO, next.autoDownloadMms)
+            putBoolean(KEY_MMS_ROAMING, next.autoDownloadMmsRoaming)
             putBoolean(KEY_A11Y, next.accessibility.on)
             putBoolean(KEY_A11Y_CONTRAST, next.accessibility.highContrast)
             putBoolean(KEY_A11Y_TEXT, next.accessibility.largerText)
@@ -92,6 +98,8 @@ class SettingsRepository private constructor(context: Context) {
             sendDelaySeconds = prefs.getInt(KEY_SEND_DELAY, defaults.sendDelaySeconds)
                 .takeIf { it in SEND_DELAYS } ?: defaults.sendDelaySeconds,
             showSimBadge = prefs.getBoolean(KEY_SIM_BADGE, defaults.showSimBadge),
+            autoDownloadMms = prefs.getBoolean(KEY_MMS_AUTO, defaults.autoDownloadMms),
+            autoDownloadMmsRoaming = prefs.getBoolean(KEY_MMS_ROAMING, defaults.autoDownloadMmsRoaming),
             accessibility = defaults.accessibility.let { a ->
                 Accessibility(
                     on = prefs.getBoolean(KEY_A11Y, a.on),
@@ -115,6 +123,8 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_SUBSCRIPTION = "default_subscription"
         private const val KEY_SEND_DELAY = "send_delay_seconds"
         private const val KEY_SIM_BADGE = "show_sim_badge"
+        private const val KEY_MMS_AUTO = "mms_auto_download"
+        private const val KEY_MMS_ROAMING = "mms_auto_download_roaming"
         private const val KEY_A11Y = "accessibility"
         private const val KEY_A11Y_CONTRAST = "accessibility_contrast"
         private const val KEY_A11Y_TEXT = "accessibility_text"

@@ -28,6 +28,7 @@ class AppDatabase private constructor(context: Context) :
         createOutgoing(db)
         createLocks(db)
         createMarks(db)
+        createMmsDownloads(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -44,6 +45,27 @@ class AppDatabase private constructor(context: Context) :
             createMarks(db)
             if (oldVersion >= 2) addTrashMarks(db)
         }
+        if (oldVersion < 8) {
+            createMmsDownloads(db)
+            if (oldVersion >= 2) addTrashMms(db)
+        }
+    }
+
+    /**
+     * Where the download of each waiting MMS stands, by its row id in the system store. A
+     * waiting MMS without a row here has not been asked for yet.
+     */
+    private fun createMmsDownloads(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE mms_downloads (mms_id INTEGER PRIMARY KEY, state INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+        )
+    }
+
+    /**
+     * A deleted MMS is kept as a file (see Trash), named here; its row has no SMS body.
+     */
+    private fun addTrashMms(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE trash_messages ADD COLUMN mms_file TEXT")
     }
 
     /**
@@ -141,7 +163,8 @@ class AppDatabase private constructor(context: Context) :
                 sub_id INTEGER NOT NULL,
                 locked INTEGER NOT NULL DEFAULT 0,
                 starred INTEGER NOT NULL DEFAULT 0,
-                reaction TEXT
+                reaction TEXT,
+                mms_file TEXT
             )
             """.trimIndent(),
         )
@@ -156,7 +179,7 @@ class AppDatabase private constructor(context: Context) :
         private const val NAME = "budstikke.db"
         const val LOCK_THREAD = 0
         const val LOCK_MESSAGE = 1
-        private const val VERSION = 7
+        private const val VERSION = 8
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

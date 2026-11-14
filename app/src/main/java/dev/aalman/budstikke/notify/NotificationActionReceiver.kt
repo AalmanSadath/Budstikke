@@ -11,6 +11,8 @@ import android.provider.Telephony
 import android.telephony.SubscriptionManager
 import android.util.Log
 import android.widget.Toast
+import dev.aalman.budstikke.data.MessageKey
+import dev.aalman.budstikke.data.MmsReader
 import androidx.core.app.RemoteInput
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.Locks
@@ -41,7 +43,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         notifier.replied(threadId)
                     }
                     ACTION_COPY_CODE -> {
-                        copyCode(context, threadId, intent.getLongExtra(EXTRA_MESSAGE_ID, -1L))
+                        copyCode(context, threadId, intent.getLongExtra(EXTRA_MESSAGE_ID, NO_MESSAGE))
                         // The code has been taken; it does not stay in the shade.
                         markRead(context, threadId)
                         notifier.cancel(threadId)
@@ -64,14 +66,20 @@ class NotificationActionReceiver : BroadcastReceiver() {
      * since the notification was posted.
      */
     private fun copyCode(context: Context, threadId: Long, messageId: Long) {
-        if (messageId < 0 || Locks.get(context).state().isLocked(threadId, messageId)) return
-        val body = context.contentResolver.query(
-            Telephony.Sms.CONTENT_URI,
-            arrayOf(Telephony.Sms.BODY),
-            "${Telephony.Sms._ID} = ? AND ${Telephony.Sms.THREAD_ID} = ?",
-            arrayOf(messageId.toString(), threadId.toString()),
-            null,
-        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return
+        if (messageId == NO_MESSAGE || Locks.get(context).state().isLocked(threadId, messageId)) return
+        val body = if (MessageKey.isMms(messageId)) {
+            MmsReader(context.contentResolver)
+                .summaries("${Telephony.Mms._ID} = ? AND ${Telephony.Mms.THREAD_ID} = ?", arrayOf(MessageKey.mmsRowId(messageId).toString(), threadId.toString()))
+                .firstOrNull()?.text
+        } else {
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.BODY),
+                "${Telephony.Sms._ID} = ? AND ${Telephony.Sms.THREAD_ID} = ?",
+                arrayOf(messageId.toString(), threadId.toString()),
+                null,
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        } ?: return
         copyCode(context, findOneTimeCode(body)?.code ?: return)
         // Android 13 and later confirm a copy themselves.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -89,6 +97,15 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 put(Telephony.Sms.SEEN, 1)
             },
             "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
+            arrayOf(threadId.toString()),
+        )
+        context.contentResolver.update(
+            Telephony.Mms.CONTENT_URI,
+            ContentValues().apply {
+                put(Telephony.Mms.READ, 1)
+                put(Telephony.Mms.SEEN, 1)
+            },
+            "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.READ} = 0",
             arrayOf(threadId.toString()),
         )
     }
@@ -111,6 +128,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
         const val EXTRA_THREAD_ID = "thread_id"
         const val EXTRA_ADDRESS = "address"
         const val EXTRA_MESSAGE_ID = "message_id"
+
+        /** No message: a [MessageKey] can be negative, for an MMS, so -1 cannot stand for none. */
+        private const val NO_MESSAGE = Long.MIN_VALUE
         const val KEY_REPLY = "reply"
         private const val TAG = "NotificationAction"
     }

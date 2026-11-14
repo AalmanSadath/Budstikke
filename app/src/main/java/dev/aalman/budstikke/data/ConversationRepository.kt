@@ -2,6 +2,7 @@ package dev.aalman.budstikke.data
 
 import android.content.Context
 import android.provider.Telephony
+import dev.aalman.budstikke.R
 import dev.aalman.budstikke.sms.isSentReaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -51,12 +52,14 @@ data class BlockedEntry(val address: String, val conversation: Conversation?, va
 enum class Folder { Main, Archive, Blocked }
 
 /**
- * Reads conversations from the system message store. Only the SMS table is queried, so
- * MMS already on the phone never shows up.
+ * Reads conversations from the system message store: SMS and MMS, which it keeps in two
+ * tables filed into the same threads.
  */
 class ConversationRepository(context: Context) {
 
-    private val resolver = context.applicationContext.contentResolver
+    private val app = context.applicationContext
+    private val resolver = app.contentResolver
+    private val mms = MmsReader(resolver)
     private val contacts = ContactRepository.get(context)
     private val flags = ConversationFlags.get(context)
     private val blocks = BlockList.get(context)
@@ -134,70 +137,108 @@ class ConversationRepository(context: Context) {
                 )
             }
         }
+        // MMS text lives in their parts; the newest match per thread stands beside the SMS one.
+        mms.matching(query, escapeLike(query)).forEach { m ->
+            if (hidden != null && hidden.isLocked(m.threadId, m.key)) return@forEach
+            val current = found[m.threadId]
+            if (current == null || current.dateMillis < m.dateMillis) {
+                found[m.threadId] = MatchedMessage(id = m.key, body = m.text, dateMillis = m.dateMillis, fromMe = !m.inbox)
+            }
+        }
         return found
     }
 
+    /** One message of either table, reduced to what choosing a thread's row needs. */
+    private class StoreRow(
+        val key: Long,
+        val threadId: Long,
+        val address: String?,
+        val snippet: String,
+        val rawText: String,
+        val dateMillis: Long,
+        val inbox: Boolean,
+        val unread: Boolean,
+        val failed: Boolean,
+        val subscriptionId: Int,
+    )
+
     private fun load(): List<Conversation>? {
-        val latest = LinkedHashMap<Long, Conversation>()
-        val unread = HashMap<Long, Int>()
-        val projection = arrayOf(
-            Telephony.Sms.THREAD_ID,
-            Telephony.Sms.ADDRESS,
-            Telephony.Sms.BODY,
-            Telephony.Sms.DATE,
-            Telephony.Sms.TYPE,
-            Telephony.Sms.READ,
-            Telephony.Sms._ID,
-            Telephony.Sms.SUBSCRIPTION_ID,
-        )
-        val lockState = locks.state()
-        val withLocked = HashSet<Long>()
-        // A thread's newest sent reaction, for a thread that holds nothing else.
-        val fallback = HashMap<Long, Conversation>()
+        val rows = ArrayList<StoreRow>()
         val cursor = resolver.query(
             Telephony.Sms.CONTENT_URI,
-            projection,
+            arrayOf(
+                Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
+                Telephony.Sms.TYPE, Telephony.Sms.READ, Telephony.Sms._ID, Telephony.Sms.SUBSCRIPTION_ID,
+            ),
             null,
             null,
             "${Telephony.Sms.DATE} DESC",
         ) ?: return null
         cursor.use { c ->
-            val thread = c.getColumnIndexOrThrow(Telephony.Sms.THREAD_ID)
-            val address = c.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
-            val body = c.getColumnIndexOrThrow(Telephony.Sms.BODY)
-            val date = c.getColumnIndexOrThrow(Telephony.Sms.DATE)
-            val type = c.getColumnIndexOrThrow(Telephony.Sms.TYPE)
-            val read = c.getColumnIndexOrThrow(Telephony.Sms.READ)
-            val id = c.getColumnIndexOrThrow(Telephony.Sms._ID)
-            val sub = c.getColumnIndexOrThrow(Telephony.Sms.SUBSCRIPTION_ID)
             while (c.moveToNext()) {
-                val threadId = c.getLong(thread)
-                val messageLocked = c.getLong(id) in lockState.messages
-                if (messageLocked) withLocked += threadId
-                val isInbox = c.getInt(type) == Telephony.Sms.MESSAGE_TYPE_INBOX
-                if (isInbox && c.getInt(read) == 0) {
-                    unread[threadId] = (unread[threadId] ?: 0) + 1
-                }
-                if (threadId in latest) continue
-                val text = c.getString(body).orEmpty()
-                val row = Conversation(
-                    threadId = threadId,
-                    address = c.getString(address).orEmpty(),
+                val type = c.getInt(4)
+                val text = c.getString(2).orEmpty()
+                rows += StoreRow(
+                    key = c.getLong(6),
+                    threadId = c.getLong(0),
+                    address = c.getString(1),
                     snippet = text,
-                    dateMillis = c.getLong(date),
-                    lastFromMe = !isInbox,
-                    unreadCount = 0,
-                    snippetLocked = messageLocked,
-                    subscriptionId = c.getInt(sub),
+                    rawText = text,
+                    dateMillis = c.getLong(3),
+                    inbox = type == Telephony.Sms.MESSAGE_TYPE_INBOX,
+                    unread = type == Telephony.Sms.MESSAGE_TYPE_INBOX && c.getInt(5) == 0,
+                    failed = type == Telephony.Sms.MESSAGE_TYPE_FAILED,
+                    subscriptionId = c.getInt(7),
                 )
-                // A reaction sent from here is folded into its message in the conversation,
-                // so the list shows the message before it instead.
-                val failed = c.getInt(type) == Telephony.Sms.MESSAGE_TYPE_FAILED
-                if (isSentReaction(text, outgoing = !isInbox, failed = failed)) {
-                    fallback.putIfAbsent(threadId, row)
-                } else {
-                    latest[threadId] = row
-                }
+            }
+        }
+        mms.summaries().forEach { m ->
+            rows += StoreRow(
+                key = m.key,
+                threadId = m.threadId,
+                address = null,
+                snippet = mmsSnippet(m),
+                rawText = m.text,
+                dateMillis = m.dateMillis,
+                inbox = m.inbox,
+                unread = m.inbox && !m.read,
+                failed = m.failed,
+                subscriptionId = m.subscriptionId,
+            )
+        }
+        // SMS and MMS come from two tables; one order, newest first, for both.
+        rows.sortByDescending { it.dateMillis }
+        val recipients by lazy { mms.threadRecipients() }
+
+        val latest = LinkedHashMap<Long, Conversation>()
+        val unread = HashMap<Long, Int>()
+        val lockState = locks.state()
+        val withLocked = HashSet<Long>()
+        // A thread's newest sent reaction, for a thread that holds nothing else.
+        val fallback = HashMap<Long, Conversation>()
+        for (r in rows) {
+            val threadId = r.threadId
+            val messageLocked = r.key in lockState.messages
+            if (messageLocked) withLocked += threadId
+            if (r.unread) unread[threadId] = (unread[threadId] ?: 0) + 1
+            if (threadId in latest) continue
+            val row = Conversation(
+                threadId = threadId,
+                // An MMS row has no address of its own; the thread's record says who it is with.
+                address = r.address ?: recipients[threadId]?.firstOrNull().orEmpty(),
+                snippet = r.snippet,
+                dateMillis = r.dateMillis,
+                lastFromMe = !r.inbox,
+                unreadCount = 0,
+                snippetLocked = messageLocked,
+                subscriptionId = r.subscriptionId,
+            )
+            // A reaction sent from here is folded into its message in the conversation,
+            // so the list shows the message before it instead.
+            if (isSentReaction(r.rawText, outgoing = !r.inbox, failed = r.failed)) {
+                fallback.putIfAbsent(threadId, row)
+            } else {
+                latest[threadId] = row
             }
         }
         fallback.forEach { (threadId, row) -> latest.putIfAbsent(threadId, row) }
@@ -218,5 +259,12 @@ class ConversationRepository(context: Context) {
                 hasLocked = it.threadId in lockState.threads || it.threadId in withLocked,
             )
         }
+    }
+
+    /** An MMS in the list: its text, or what it carries when it has none. */
+    private fun mmsSnippet(m: MmsSummary): String = when {
+        m.waiting -> app.getString(R.string.mms_waiting)
+        m.text.isNotEmpty() -> m.text
+        else -> app.getString(attachmentLabel(m.attachment))
     }
 }

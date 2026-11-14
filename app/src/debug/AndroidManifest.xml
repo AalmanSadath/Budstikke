@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug builds only: incoming MMS on the emulator, whose modem cannot deliver a
+             WAP push. Not exported; only root can send to it. -->
+        <receiver
+            android:name=".sms.DebugMmsPushReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
