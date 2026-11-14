@@ -126,6 +126,13 @@ fun foldReactions(messages: List<Message>): FoldedMessages {
 }
 
 /**
+ * Whether a message is a reaction this phone sent, which the conversation list passes over
+ * for its snippet. A failed one stays, as the conversation still shows it.
+ */
+fun isSentReaction(body: String, outgoing: Boolean, failed: Boolean): Boolean =
+    outgoing && !failed && parseReaction(body) != null
+
+/**
  * Whether a reaction may go out as an SMS to [address]: only a full phone number. A sender
  * name cannot be replied to, and a short code is a service that reads what it is sent as a
  * command and may charge for it.
