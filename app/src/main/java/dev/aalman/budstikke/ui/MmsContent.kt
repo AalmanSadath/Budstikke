@@ -211,7 +211,7 @@ internal fun PhotoViewer(attachment: Attachment, onClose: () -> Unit) {
  * claims huge dimensions cannot make the app allocate for them.
  */
 @Composable
-private fun rememberDecoded(uri: Uri, maxPx: Int): ImageBitmap? {
+internal fun rememberDecoded(uri: Uri, maxPx: Int): ImageBitmap? {
     val context = LocalContext.current
     val image by produceState<ImageBitmap?>(null, uri, maxPx) {
         value = withContext(Dispatchers.IO) {

@@ -20,16 +20,22 @@ object MessageKey {
     fun mmsRowId(key: Long): Long = -key
 }
 
-/** A picture, video, sound or file in an MMS, read from the store when shown or opened. */
-data class Attachment(val uri: Uri, val contentType: String, val name: String?) {
-    val kind: AttachmentKind
-        get() = when {
-            contentType.startsWith("image/") -> AttachmentKind.Image
-            contentType.startsWith("video/") -> AttachmentKind.Video
-            contentType.startsWith("audio/") -> AttachmentKind.Audio
-            contentType.equals("text/x-vcard", true) || contentType.equals("text/vcard", true) -> AttachmentKind.Contact
-            else -> AttachmentKind.File
-        }
+/**
+ * A picture, video, sound or file in an MMS, read from the store when shown or opened. The
+ * part's URI is kept as text, so plain JVM tests can make one.
+ */
+data class Attachment(val uriString: String, val contentType: String, val name: String?) {
+    val uri: Uri get() = uriString.toUri()
+    val kind: AttachmentKind get() = attachmentKind(contentType)
+}
+
+/** What kind of attachment a part of [contentType] is. */
+fun attachmentKind(contentType: String): AttachmentKind = when {
+    contentType.startsWith("image/") -> AttachmentKind.Image
+    contentType.startsWith("video/") -> AttachmentKind.Video
+    contentType.startsWith("audio/") -> AttachmentKind.Audio
+    contentType.equals("text/x-vcard", true) || contentType.equals("text/vcard", true) -> AttachmentKind.Contact
+    else -> AttachmentKind.File
 }
 
 enum class AttachmentKind { Image, Video, Audio, Contact, File }
@@ -77,7 +83,7 @@ internal class MmsReader(private val resolver: ContentResolver) {
                 dateMillis = r.dateSeconds * 1000,
                 state = stateOf(r.box),
                 subscriptionId = r.subscriptionId,
-                attachments = own.filter { it.isAttachment }.map { Attachment(it.uri, it.contentType, it.name) },
+                attachments = own.filter { it.isAttachment }.map { Attachment(it.uri.toString(), it.contentType, it.name) },
                 waiting = if (r.waiting) WaitingMms(r.id, r.size, downloads[r.id] ?: DownloadState.Waiting) else null,
             )
         }
@@ -99,7 +105,7 @@ internal class MmsReader(private val resolver: ContentResolver) {
                 failed = r.box == Mms.MESSAGE_BOX_FAILED,
                 subscriptionId = r.subscriptionId,
                 text = own.filter { it.isText }.joinToString(" ") { it.text }.trim(),
-                attachment = own.firstOrNull { it.isAttachment }?.let { Attachment(Uri.EMPTY, it.contentType, null).kind },
+                attachment = own.firstOrNull { it.isAttachment }?.let { attachmentKind(it.contentType) },
                 waiting = r.waiting,
             )
         }.sortedByDescending { it.dateMillis }

@@ -1,7 +1,15 @@
 package dev.aalman.budstikke
 
 import kotlinx.coroutines.flow.combine
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import android.widget.Toast
+import androidx.core.net.toUri
+import dev.aalman.budstikke.sms.MmsImages
+import dev.aalman.budstikke.sms.MmsSender
+import dev.aalman.budstikke.data.MessageKey
 import dev.aalman.budstikke.data.DownloadState
+import dev.aalman.budstikke.data.AttachmentKind
 import dev.aalman.budstikke.sms.MmsDownloader
 import dev.aalman.budstikke.data.Marks
 import dev.aalman.budstikke.data.MarkState
@@ -378,6 +386,30 @@ private fun ConversationRoute(
     val flow = remember(thread.threadId) { repository.messages(thread.threadId) }
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
+    // Pictures picked to go with the next message, as URIs; with any, it goes as an MMS.
+    var attached by rememberSaveable(thread.threadId) { mutableStateOf(listOf<String>()) }
+    val pickPhotos = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(MAX_PHOTOS),
+    ) { uris -> attached = (attached + uris.map { it.toString() }).distinct().take(MAX_PHOTOS) }
+    /**
+     * Shrinks the attached pictures for sending, then hands them to [then]; tells the user
+     * and keeps them attached when one cannot be read or made small enough.
+     */
+    fun withImages(body: String, subscription: Int, then: suspend (List<ByteArray>) -> Unit) {
+        val picked = attached
+        attached = emptyList()
+        scope.launch {
+            val images = if (picked.isEmpty()) emptyList() else withContext(Dispatchers.IO) {
+                MmsImages.prepare(context, picked.map { it.toUri() }, body, subscription)
+            }
+            if (images == null) {
+                attached = picked
+                Toast.makeText(context, R.string.attach_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            withContext(Dispatchers.IO) { then(images) }
+        }
+    }
     // Unsent text is kept as a draft: filled in when the conversation opens, saved shortly
     // after typing stops, and saved at once when the screen or the app is left.
     val drafts = remember { Drafts.get(context) }
@@ -549,7 +581,8 @@ private fun ConversationRoute(
             scope.launch(Dispatchers.IO) {
                 markStore.setReaction(message.id, if (removing) null else emoji)
                 if (canSendReactionTo(thread.address)) {
-                    val body = reactionText(emoji, message.body, removed = removing)
+                    val image = message.attachments.any { it.kind == AttachmentKind.Image }
+                    val body = reactionText(emoji, message.body, removed = removing, image = image)
                     OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
                 }
             }
@@ -579,17 +612,21 @@ private fun ConversationRoute(
         simBadge = sim?.let { simSlots(sims, settings.showSimBadge)[it.subscriptionId] },
         onSend = {
             val body = text.trim()
-            if (body.isNotEmpty()) {
+            if (body.isNotEmpty() || attached.isNotEmpty()) {
                 text = ""
                 val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                scope.launch(Dispatchers.IO) {
-                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
+                withImages(body, subscription) { images ->
+                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription, images)
                 }
             }
         },
+        attachments = attached,
+        onAttach = { pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        onRemoveAttachment = { uri -> attached = attached - uri },
         onRetry = { message ->
-            // Sending MMS comes with the compose bar's attachments; until then only SMS retry.
-            if (!message.isMms) scope.launch(Dispatchers.IO) { sender.retry(message.id) }
+            scope.launch(Dispatchers.IO) {
+                if (message.isMms) MmsSender.retry(context, MessageKey.mmsRowId(message.id)) else sender.retry(message.id)
+            }
         },
         onDownload = { message ->
             val waiting = message.waiting
@@ -598,7 +635,7 @@ private fun ConversationRoute(
             }
         },
         pending = pending,
-        onSchedule = { if (text.isNotBlank()) picker = SchedulePick(null) },
+        onSchedule = { if (text.isNotBlank() || attached.isNotEmpty()) picker = SchedulePick(null) },
         onPendingAction = { message, action ->
             when (action) {
                 PendingAction.ChangeTime -> picker = SchedulePick(message)
@@ -606,6 +643,9 @@ private fun ConversationRoute(
                     val claimed = withContext(Dispatchers.IO) { outgoing.claim(message.id) } ?: return@launch
                     // Back into the field to change; scheduling again is a long press away.
                     text = if (text.isBlank()) claimed.body else "${text.trimEnd()} ${claimed.body}"
+                    // Its pictures come back too, from the files kept for it until the app restarts.
+                    val files = withContext(Dispatchers.IO) { outgoing.imageFiles(claimed) }
+                    attached = (attached + files.map { Uri.fromFile(it).toString() }).distinct().take(MAX_PHOTOS)
                 }
                 else -> pendingAction(scope, context, undo, resources, message, action)
             }
@@ -647,15 +687,15 @@ private fun ConversationRoute(
                     scope.launch(Dispatchers.IO) { outgoing.reschedule(changing.id, millis) }
                 } else {
                     val body = text.trim()
-                    if (body.isEmpty()) return@SchedulePicker
+                    if (body.isEmpty() && attached.isEmpty()) return@SchedulePicker
                     text = ""
                     val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            outgoing.add(thread.threadId, thread.address, body, subscription, millis, delayed = false)
+                    withImages(body, subscription) { images ->
+                        outgoing.add(thread.threadId, thread.address, body, subscription, millis, delayed = false, images = images)
+                        withContext(Dispatchers.Main) {
+                            undo.snackbar.currentSnackbarData?.dismiss()
+                            undo.snackbar.showSnackbar(resources.getString(R.string.scheduled_done, messageTime(context, millis)))
                         }
-                        undo.snackbar.currentSnackbarData?.dismiss()
-                        undo.snackbar.showSnackbar(resources.getString(R.string.scheduled_done, messageTime(context, millis)))
                     }
                 }
             },
@@ -835,6 +875,9 @@ private fun BlockedRoute(
 }
 
 /** The schedule picker is open: to change [message]'s time, or for a new one when null. */
+/** How many pictures one message carries at most. */
+private const val MAX_PHOTOS = 5
+
 private data class SchedulePick(val message: PendingMessage?)
 
 /** Sends a waiting message now, or cancels it with undo. */

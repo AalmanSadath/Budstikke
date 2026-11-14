@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
+import java.io.File
 import dev.aalman.budstikke.sms.OutgoingQueue
 import androidx.core.database.sqlite.transaction
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,8 @@ data class PendingMessage(
     val sendAtMillis: Long,
     /** Held back by the send delay rather than scheduled by hand. */
     val delayed: Boolean,
+    /** Pictures going with it, as an MMS; their files are named by [id]. */
+    val attachments: Int = 0,
 )
 
 /**
@@ -42,7 +45,15 @@ class Outgoing private constructor(context: Context) {
     fun forThread(threadId: Long): Flow<List<PendingMessage>> =
         version.map { query("$THREAD_ID = ?", arrayOf(threadId.toString())) }.flowOn(Dispatchers.IO)
 
-    fun add(threadId: Long, address: String, body: String, subscriptionId: Int, sendAtMillis: Long, delayed: Boolean): Long {
+    fun add(
+        threadId: Long,
+        address: String,
+        body: String,
+        subscriptionId: Int,
+        sendAtMillis: Long,
+        delayed: Boolean,
+        images: List<ByteArray> = emptyList(),
+    ): Long {
         val id = db.writableDatabase.insertOrThrow(
             TABLE, null,
             ContentValues().apply {
@@ -52,11 +63,48 @@ class Outgoing private constructor(context: Context) {
                 put(SUB_ID, subscriptionId)
                 put(SEND_AT, sendAtMillis)
                 put(DELAYED, if (delayed) 1 else 0)
+                put(ATTACHMENTS, images.size)
             },
         )
+        // The pictures are written before the alarm can see the row; a failed write takes
+        // the row out again rather than send the text without them.
+        try {
+            val dir = filesOf(id).apply { mkdirs() }
+            images.forEachIndexed { i, bytes -> File(dir, "image$i.jpg").writeBytes(bytes) }
+        } catch (e: Exception) {
+            db.writableDatabase.delete(TABLE, "$ID = ?", arrayOf(id.toString()))
+            dropFiles(id)
+            throw e
+        }
         changed()
         return id
     }
+
+    /** The pictures of a pending message, in order. */
+    fun images(message: PendingMessage): List<ByteArray> =
+        (0 until message.attachments).mapNotNull { i -> File(filesOf(message.id), "image$i.jpg").takeIf { it.exists() }?.readBytes() }
+
+    /** Where a pending message's pictures are, as file URIs, for putting them back in the field. */
+    fun imageFiles(message: PendingMessage): List<File> =
+        (0 until message.attachments).map { File(filesOf(message.id), "image$it.jpg") }.filter { it.exists() }
+
+    /** Deletes a pending message's pictures, once it is sent. */
+    fun dropFiles(id: Long) {
+        filesOf(id).deleteRecursively()
+    }
+
+    /**
+     * Deletes pictures whose message is gone: cancelled, edited, or sent while the app was
+     * stopped. A cancelled message keeps them until then, so Undo can bring it back whole.
+     */
+    fun sweepFiles() {
+        val live = query(null, null).mapTo(HashSet()) { it.id.toString() }
+        files.listFiles()?.forEach { if (it.name !in live) it.deleteRecursively() }
+    }
+
+    private val files = File(this.context.filesDir, "outgoing")
+
+    private fun filesOf(id: Long) = File(files, id.toString())
 
     /** Puts back a message taken out by [claim], keeping its id. */
     fun restore(message: PendingMessage) {
@@ -70,6 +118,7 @@ class Outgoing private constructor(context: Context) {
                 put(SUB_ID, message.subscriptionId)
                 put(SEND_AT, message.sendAtMillis)
                 put(DELAYED, if (message.delayed) 1 else 0)
+                put(ATTACHMENTS, message.attachments)
             },
         )
         changed()
@@ -105,7 +154,7 @@ class Outgoing private constructor(context: Context) {
 
     private fun query(selection: String?, args: Array<String>?): List<PendingMessage> =
         db.readableDatabase.query(
-            TABLE, arrayOf(ID, THREAD_ID, ADDRESS, BODY, SUB_ID, SEND_AT, DELAYED),
+            TABLE, arrayOf(ID, THREAD_ID, ADDRESS, BODY, SUB_ID, SEND_AT, DELAYED, ATTACHMENTS),
             selection, args, null, null, "$SEND_AT ASC, $ID ASC",
         ).use { c -> buildList { while (c.moveToNext()) add(c.toMessage()) } }
 
@@ -117,6 +166,7 @@ class Outgoing private constructor(context: Context) {
         subscriptionId = getInt(4),
         sendAtMillis = getLong(5),
         delayed = getInt(6) != 0,
+        attachments = getInt(7),
     )
 
     /** Tells open screens, and moves the alarm to whatever is now soonest. */
@@ -134,6 +184,7 @@ class Outgoing private constructor(context: Context) {
         private const val SUB_ID = "sub_id"
         private const val SEND_AT = "send_at"
         private const val DELAYED = "delayed"
+        private const val ATTACHMENTS = "attachments"
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

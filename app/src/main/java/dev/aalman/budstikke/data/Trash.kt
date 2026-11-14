@@ -212,7 +212,7 @@ class Trash private constructor(context: Context) {
         if (text.isNotEmpty()) return text
         val first = record.parts.firstOrNull { it.text == null && it.contentType != MmsStore.SMIL }
             ?: return app.getString(R.string.mms_waiting)
-        return app.getString(attachmentLabel(Attachment(android.net.Uri.EMPTY, first.contentType, null).kind))
+        return app.getString(attachmentLabel(attachmentKind(first.contentType)))
     }
 
     private fun mmsInThread(threadId: Long): List<Long> = resolver.query(

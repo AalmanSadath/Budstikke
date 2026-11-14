@@ -49,6 +49,13 @@ class AppDatabase private constructor(context: Context) :
             createMmsDownloads(db)
             if (oldVersion >= 2) addTrashMms(db)
         }
+        // A table made at version 5 or later in this same upgrade already has the column.
+        if (oldVersion in 5..8) addOutgoingAttachments(db)
+    }
+
+    /** A pending message's pictures are files named by its id (see Outgoing); this counts them. */
+    private fun addOutgoingAttachments(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE scheduled_messages ADD COLUMN attachments INTEGER NOT NULL DEFAULT 0")
     }
 
     /**
@@ -112,7 +119,8 @@ class AppDatabase private constructor(context: Context) :
                 body TEXT NOT NULL,
                 sub_id INTEGER NOT NULL,
                 send_at INTEGER NOT NULL,
-                delayed INTEGER NOT NULL DEFAULT 0
+                delayed INTEGER NOT NULL DEFAULT 0,
+                attachments INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent(),
         )
@@ -179,7 +187,7 @@ class AppDatabase private constructor(context: Context) :
         private const val NAME = "budstikke.db"
         const val LOCK_THREAD = 0
         const val LOCK_MESSAGE = 1
-        private const val VERSION = 8
+        private const val VERSION = 9
 
         // Holds only the application context, which lives as long as the process anyway.
         @SuppressLint("StaticFieldLeak")

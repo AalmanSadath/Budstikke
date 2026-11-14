@@ -31,21 +31,39 @@ object OutgoingQueue {
      * Sends a message typed in the app: at once, or held back for the send delay set in
      * Settings, during which the conversation shows a countdown and Cancel.
      */
-    fun sendOrHold(context: Context, threadId: Long, address: String, body: String, subscriptionId: Int) {
+    fun sendOrHold(
+        context: Context,
+        threadId: Long,
+        address: String,
+        body: String,
+        subscriptionId: Int,
+        images: List<ByteArray> = emptyList(),
+    ) {
         val delaySeconds = SettingsRepository.get(context).settings.value.sendDelaySeconds
         if (delaySeconds <= 0) {
-            SmsSender(context).send(address, body, subscriptionId)
+            deliver(context, address, body, subscriptionId, images)
             return
         }
         val sendAt = System.currentTimeMillis() + delaySeconds * 1000L
-        val id = Outgoing.get(context).add(threadId, address, body, subscriptionId, sendAt, delayed = true)
+        val id = Outgoing.get(context).add(threadId, address, body, subscriptionId, sendAt, delayed = true, images = images)
         sendWhenDue(context, id, sendAt)
     }
 
     /** Sends one message now, if nothing else has sent or cancelled it. */
     fun sendNow(context: Context, id: Long) {
-        val message = Outgoing.get(context).claim(id) ?: return
-        SmsSender(context).send(message.address, message.body, message.subscriptionId)
+        val outgoing = Outgoing.get(context)
+        val message = outgoing.claim(id) ?: return
+        deliver(context, message.address, message.body, message.subscriptionId, outgoing.images(message))
+        outgoing.dropFiles(message.id)
+    }
+
+    /** Text alone goes as SMS; with pictures, as one MMS. */
+    private fun deliver(context: Context, address: String, body: String, subscriptionId: Int, images: List<ByteArray>) {
+        if (images.isEmpty()) {
+            SmsSender(context).send(address, body, subscriptionId)
+        } else {
+            MmsSender.send(context, listOf(address), body, images, subscriptionId)
+        }
     }
 
     private val timers = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -66,11 +84,11 @@ object OutgoingQueue {
     /** Sends everything whose time has come, including what fell due while the phone was off. */
     fun sendDue(context: Context) {
         val outgoing = Outgoing.get(context)
-        val sender = SmsSender(context)
         for (due in outgoing.due()) {
             val message = outgoing.claim(due.id) ?: continue
             try {
-                sender.send(message.address, message.body, message.subscriptionId)
+                deliver(context, message.address, message.body, message.subscriptionId, outgoing.images(message))
+                outgoing.dropFiles(message.id)
             } catch (e: Exception) {
                 Log.e(TAG, "Could not send a scheduled message", e)
             }

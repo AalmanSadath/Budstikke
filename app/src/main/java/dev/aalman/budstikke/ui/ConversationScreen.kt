@@ -68,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
@@ -152,6 +153,9 @@ fun ConversationScreen(
     onStar: (Set<Long>, Boolean) -> Unit = { _, _ -> },
     /** Fetches an MMS still waiting at the carrier. */
     onDownload: (Message) -> Unit = {},
+    attachments: List<String> = emptyList(),
+    onAttach: (() -> Unit)? = null,
+    onRemoveAttachment: (String) -> Unit = {},
 ) {
     // The picture opened from a bubble, over the whole screen.
     var viewing by remember { mutableStateOf<Attachment?>(null) }
@@ -359,6 +363,9 @@ fun ConversationScreen(
                 anchored = false
                 onSchedule()
             },
+            attachments = attachments,
+            onAttach = onAttach,
+            onRemoveAttachment = onRemoveAttachment,
         )
     }
 }
@@ -376,6 +383,7 @@ private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, Pe
         DelayedBubble(message) { onAction(message, PendingAction.Edit) }
         return
     }
+    val shownText = pendingText(message)
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val time = messageTime(context, message.sendAtMillis)
@@ -384,14 +392,14 @@ private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, Pe
     Column(
         Modifier
             .fillMaxWidth()
-            .clearAndSetSemantics { contentDescription = "$label: ${message.body}" }
+            .clearAndSetSemantics { contentDescription = "$label: ${shownText}" }
             .clickable { menu = true },
         horizontalAlignment = Alignment.End,
     ) {
         Column(Modifier.fillMaxWidth(0.8f), horizontalAlignment = Alignment.End) {
             Box {
                 Text(
-                    message.body,
+                    shownText,
                     Modifier
                         .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
                         .background(colors.primary.copy(alpha = 0.45f))
@@ -436,6 +444,7 @@ private fun PendingBubble(message: PendingMessage, onAction: (PendingMessage, Pe
  */
 @Composable
 private fun DelayedBubble(message: PendingMessage, onCancel: () -> Unit) {
+    val shownText = pendingText(message)
     val colors = MaterialTheme.colorScheme
     val now by produceState(System.currentTimeMillis(), message.sendAtMillis) {
         while (true) {
@@ -447,11 +456,11 @@ private fun DelayedBubble(message: PendingMessage, onCancel: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         // Read as one, the countdown with the text; Cancel stays its own button.
         Column(
-            Modifier.fillMaxWidth(0.8f).clearAndSetSemantics { contentDescription = "$label: ${message.body}" },
+            Modifier.fillMaxWidth(0.8f).clearAndSetSemantics { contentDescription = "$label: ${shownText}" },
             horizontalAlignment = Alignment.End,
         ) {
             Text(
-                message.body,
+                shownText,
                 Modifier
                     .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
                     .background(colors.primary.copy(alpha = 0.45f))
@@ -468,6 +477,14 @@ private fun DelayedBubble(message: PendingMessage, onCancel: () -> Unit) {
 }
 
 /** Whole seconds until [sendAtMillis], rounded up so the count reaches 1 before it goes, never below 0. */
+/** A pending message's text, after how many pictures go with it. */
+@Composable
+private fun pendingText(message: PendingMessage): String {
+    if (message.attachments == 0) return message.body
+    val photos = pluralStringResource(R.plurals.pending_photos, message.attachments, message.attachments)
+    return listOf(photos, message.body).filter { it.isNotBlank() }.joinToString("\n")
+}
+
 internal fun secondsLeft(sendAtMillis: Long, nowMillis: Long): Int =
     ((sendAtMillis - nowMillis + 999) / 1000).coerceAtLeast(0).toInt()
 

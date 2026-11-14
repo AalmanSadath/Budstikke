@@ -259,6 +259,13 @@
     <string name="mms_waiting_description">Multimedia message, not downloaded yet</string>
     <string name="attachment_open_none">No app here can open this</string>
     <string name="photo_viewer_close">Close</string>
+    <string name="attach_photos">Add photos</string>
+    <string name="remove_attachment">Remove photo</string>
+    <string name="attach_failed">Couldn\'t add that photo</string>
+    <plurals name="pending_photos">
+        <item quantity="one">%d photo</item>
+        <item quantity="other">%d photos</item>
+    </plurals>
     <string name="settings_mms_auto">Download MMS automatically</string>
     <string name="settings_mms_auto_summary">Pictures and other attachments are fetched as they arrive</string>
     <string name="settings_mms_roaming">Also while roaming</string>
