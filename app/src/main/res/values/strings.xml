@@ -274,4 +274,9 @@
     <string name="settings_mms_auto_summary">Pictures and other attachments are fetched as they arrive</string>
     <string name="settings_mms_roaming">Also while roaming</string>
     <string name="settings_mms_roaming_summary">Mobile data abroad can cost more</string>
+    <string name="settings_long_text_mms">Send long texts as MMS</string>
+    <plurals name="settings_long_text_mms_summary">
+        <item quantity="one">Longer than %1$d SMS, a text goes as one MMS so it arrives whole</item>
+        <item quantity="other">Longer than %1$d SMS, a text goes as one MMS so it arrives whole</item>
+    </plurals>
 </resources>

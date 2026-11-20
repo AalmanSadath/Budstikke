@@ -59,15 +59,23 @@ object OutgoingQueue {
 
     /**
      * Text to one person goes as SMS. With pictures, or to a group, it goes as one MMS, so
-     * everyone sees the same conversation with everyone in it.
+     * everyone sees the same conversation with everyone in it. So does a text too long for
+     * a few SMS when that is on, so it arrives whole rather than in parts.
      */
     fun deliver(context: Context, addresses: List<String>, body: String, subscriptionId: Int, images: List<ByteArray>) {
         val single = addresses.singleOrNull()
-        if (single != null && images.isEmpty()) {
+        if (single != null && images.isEmpty() && !longTextAsMms(context, body, subscriptionId)) {
             SmsSender(context).send(single, body, subscriptionId)
         } else if (addresses.isNotEmpty()) {
             MmsSender.send(context, addresses, body, images, subscriptionId)
         }
+    }
+
+    private fun longTextAsMms(context: Context, body: String, subscriptionId: Int): Boolean {
+        val setting = SettingsRepository.get(context).settings.value.longTextAsMms
+        if (setting == false) return false
+        val parts = runCatching { smsManagerFor(context, subscriptionId).divideMessage(body).size }.getOrDefault(1)
+        return MmsLimits.of(context, subscriptionId).sendsAsMms(parts, setting)
     }
 
     private val timers = CoroutineScope(SupervisorJob() + Dispatchers.IO)

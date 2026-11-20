@@ -7,9 +7,25 @@ import android.net.Uri
 import android.telephony.SmsManager
 import java.io.ByteArrayOutputStream
 
-/** What the carrier accepts in one MMS. */
-data class MmsLimits(val maxMessageBytes: Int, val maxWidth: Int, val maxHeight: Int) {
+/**
+ * What the carrier accepts in one MMS, and [textThreshold]: how many SMS parts a text may
+ * take before the carrier would rather have it as an MMS, or 0 when it names none.
+ */
+data class MmsLimits(val maxMessageBytes: Int, val maxWidth: Int, val maxHeight: Int, val textThreshold: Int = 0) {
+
+    /** How many SMS parts a text may take before it goes as an MMS, when that is on. */
+    val longTextParts: Int get() = if (textThreshold > 0) textThreshold else DEFAULT_LONG_TEXT_PARTS
+
+    /**
+     * Whether a text of [parts] SMS goes as one MMS. [setting] is the person's choice, or
+     * null to follow the carrier, which turns it on by naming a threshold.
+     */
+    fun sendsAsMms(parts: Int, setting: Boolean?): Boolean = (setting ?: (textThreshold > 0)) && parts > longTextParts
+
     companion object {
+        /** Used when the carrier names no threshold: past three SMS, parts often arrive out of order. */
+        const val DEFAULT_LONG_TEXT_PARTS = 3
+
         /** Used when the carrier names no limit: what most carriers accept. */
         val DEFAULT = MmsLimits(maxMessageBytes = 300 * 1024, maxWidth = 1600, maxHeight = 1600)
 
@@ -22,6 +38,7 @@ data class MmsLimits(val maxMessageBytes: Int, val maxWidth: Int, val maxHeight:
                 maxMessageBytes = positive(SmsManager.MMS_CONFIG_MAX_MESSAGE_SIZE, DEFAULT.maxMessageBytes),
                 maxWidth = positive(SmsManager.MMS_CONFIG_MAX_IMAGE_WIDTH, DEFAULT.maxWidth),
                 maxHeight = positive(SmsManager.MMS_CONFIG_MAX_IMAGE_HEIGHT, DEFAULT.maxHeight),
+                textThreshold = config.getInt(SmsManager.MMS_CONFIG_SMS_TO_MMS_TEXT_THRESHOLD, 0).coerceAtLeast(0),
             )
         }
     }

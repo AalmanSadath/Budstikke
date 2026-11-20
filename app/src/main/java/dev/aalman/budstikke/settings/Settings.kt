@@ -30,6 +30,11 @@ data class Settings(
     val autoDownloadMms: Boolean = true,
     /** Fetches them while roaming too, where mobile data can cost more. */
     val autoDownloadMmsRoaming: Boolean = false,
+    /**
+     * A text too long for a few SMS goes as one MMS instead. Null follows the carrier: on
+     * when it names a length for that, off when it does not.
+     */
+    val longTextAsMms: Boolean? = null,
     /** Accessibility mode, with each of its parts that can be turned off on its own. */
     val accessibility: Accessibility = Accessibility(),
 )
@@ -78,6 +83,7 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean(KEY_SIM_BADGE, next.showSimBadge)
             putBoolean(KEY_MMS_AUTO, next.autoDownloadMms)
             putBoolean(KEY_MMS_ROAMING, next.autoDownloadMmsRoaming)
+            if (next.longTextAsMms != null) putBoolean(KEY_LONG_TEXT_MMS, next.longTextAsMms) else remove(KEY_LONG_TEXT_MMS)
             putBoolean(KEY_A11Y, next.accessibility.on)
             putBoolean(KEY_A11Y_CONTRAST, next.accessibility.highContrast)
             putBoolean(KEY_A11Y_TEXT, next.accessibility.largerText)
@@ -100,6 +106,7 @@ class SettingsRepository private constructor(context: Context) {
             showSimBadge = prefs.getBoolean(KEY_SIM_BADGE, defaults.showSimBadge),
             autoDownloadMms = prefs.getBoolean(KEY_MMS_AUTO, defaults.autoDownloadMms),
             autoDownloadMmsRoaming = prefs.getBoolean(KEY_MMS_ROAMING, defaults.autoDownloadMmsRoaming),
+            longTextAsMms = if (prefs.contains(KEY_LONG_TEXT_MMS)) prefs.getBoolean(KEY_LONG_TEXT_MMS, false) else null,
             accessibility = defaults.accessibility.let { a ->
                 Accessibility(
                     on = prefs.getBoolean(KEY_A11Y, a.on),
@@ -125,6 +132,7 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_SIM_BADGE = "show_sim_badge"
         private const val KEY_MMS_AUTO = "mms_auto_download"
         private const val KEY_MMS_ROAMING = "mms_auto_download_roaming"
+        private const val KEY_LONG_TEXT_MMS = "long_text_as_mms"
         private const val KEY_A11Y = "accessibility"
         private const val KEY_A11Y_CONTRAST = "accessibility_contrast"
         private const val KEY_A11Y_TEXT = "accessibility_text"
