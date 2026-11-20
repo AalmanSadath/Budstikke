@@ -5,8 +5,9 @@ they can be checked by hand in the running app on a phone. Behaviour is taken fr
 an1ndra/Messages visibly does (its README, store description, screenshots and release notes),
 not from its source. The look is not taken from it; screens follow BifroSSH's styling.
 
-The first version handles SMS only. MMS is neither sent, received for display, nor read from
-the system message store. Where a criterion says "message", it means an SMS.
+The first version handled SMS only. MMS came after it, in R25 to R31; R21 and R24 changed
+with it. Where a criterion in R1 to R24 says "message", it means an SMS unless it says
+otherwise.
 
 Status: `[ ]` open, `[x]` met and checked on a device.
 
@@ -207,7 +208,8 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 - [x] After choosing a source and a file through the file picker, imported messages appear in
       their conversations with original dates and sent or received direction.
 - [x] Progress is shown, and importing the same file twice does not duplicate messages.
-- [x] MMS entries in an imported file are skipped, and the result says how many were skipped.
+- [x] MMS in an SMS Import / Export `.zip` are imported with their pictures and files (R31).
+      MMS in other files are skipped, and the result says how many were skipped.
 
 ## R22. Colours and themes
 
@@ -231,4 +233,72 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
 - [ ] The installed app lists no "full network access" permission in Android's app info.
 - [ ] The release APK's manifest contains no `android.permission.INTERNET`.
 - [ ] Every feature above works with mobile data and Wi-Fi turned off, except sending and
-      receiving SMS, which need only the mobile network.
+      receiving SMS, which need only the mobile network, and sending and downloading MMS,
+      which Android's own MMS service does over mobile data.
+
+## R25. Receive and show MMS
+
+- [x] A picture message from another phone appears in its conversation with the picture in the
+      bubble; a tap opens it full screen.
+- [x] Videos, voice notes, contact cards and other files show as a chip that opens them in
+      the app that handles them.
+- [x] MMS already on the phone show in their conversations, in date order with the SMS, and
+      the list, search, notifications, stars, locks and trash cover them as they do SMS.
+- [x] With "Download MMS automatically" off, or while roaming without "Also while roaming", a
+      message waits with a Download button and its size; a failed download can be tried again.
+- [x] An MMS from a blocked number is not downloaded and gives no notification.
+- [x] A picture claiming huge dimensions is decoded at a bounded size, so it cannot run the
+      app out of memory.
+
+## R26. Send pictures
+
+- [x] The compose bar, in a conversation and in New message, has a button that opens the
+      system photo picker; up to five pictures show as removable thumbnails.
+- [x] Each picture is shrunk to fit the carrier's size and dimension limits and re-encoded,
+      dropping its location and other metadata.
+- [x] Sending, the send delay, scheduling, retrying a failed message and editing a pending one
+      work with pictures as they do with text.
+- [x] Reacting to a picture sends `Reacted 👍 to an image`, as Google Messages words it.
+
+## R27. Group conversations
+
+- [x] A received MMS sent to several people opens one group conversation with all of them
+      except this phone.
+- [x] A group shows its members' first names and two overlapping avatars; each received
+      message names its sender over the first bubble of their run, with their avatar beside it.
+- [x] New message with several numbers starts one group conversation; anything sent to a group
+      goes as one MMS.
+- [x] Details list a group's members, each opening their contact. A group is never called or
+      blocked as a whole; a blocked member's messages are still dropped.
+- [x] A group's notification names the group and each sender, and a reply from it goes to
+      the whole group.
+
+## R28. Send long texts as MMS
+
+- [x] Settings has "Send long texts as MMS". Until changed, it follows the carrier: on when the
+      carrier names a threshold, off when it does not.
+- [x] When on, a text longer than the carrier's threshold, or than three SMS when it names
+      none, goes as one MMS; shorter texts stay SMS.
+
+## R29. Back up MMS
+
+- [x] A backup holds MMS with their pictures and files, unless "Include pictures and
+      attachments" is unticked, when they keep their text and show placeholders.
+- [x] A large backup is written and read in pieces, without holding it in memory whole.
+- [x] Restoring brings MMS back with their stars, locks and reactions, and does not duplicate
+      those already on the phone; a wrong PIN or damaged file still changes nothing.
+- [x] Backups from before MMS still restore.
+
+## R30. Pictures in notifications
+
+- [x] A received picture shows in its notification, scaled down, with its text under it.
+- [x] A locked conversation's or message's notification shows no picture.
+- [ ] On a lock screen that hides private content, the notification shows text only.
+- [x] The scaled copies are deleted once the notification is gone.
+
+## R31. Import MMS
+
+- [ ] An SMS Import / Export `.zip` exported from a real phone imports its MMS with their
+      pictures, in the right conversations and with the right dates.
+- [x] Only plain file names from the `.zip` are used, so nothing is written outside the app's
+      own scratch folder, and that folder is removed afterwards.

@@ -2,11 +2,12 @@
 
 [![CI](https://github.com/AalmanSadath/Budstikke/actions/workflows/ci.yml/badge.svg)](https://github.com/AalmanSadath/Budstikke/actions/workflows/ci.yml)
 
-An SMS app for Android that keeps your messages on your phone.
+An SMS and MMS app for Android that keeps your messages on your phone.
 
 Budstikke replaces your default SMS app. It has no internet permission, so Android blocks it
 from reaching the network: your messages never leave the device through the app, and nothing
-goes through Google.
+goes through Google. Picture and group messages travel through Android's own MMS service,
+the same service the phone's built-in messaging app uses.
 
 <p>
   <a href="docs/screenshots/list.png"><img src="docs/screenshots/list.png" width="200" alt="Conversation list"></a>
@@ -20,7 +21,17 @@ goes through Google.
 ### Messaging
 - Send and receive SMS, with a choice of SIM on phones with more than one. An optional badge
   shows which SIM each conversation uses.
-- Reply straight from the notification.
+- Send and receive pictures. Photos are shrunk to fit your carrier's limit, and their
+  location and other details are stripped before they go. Videos, voice notes, contact
+  cards and files that arrive open in the app that handles them.
+- Group conversations: everyone's messages in one thread, with each sender's name and photo.
+  Start one by adding several people in New message.
+- Picture messages download as they arrive, or wait for a tap when you turn that off, and
+  they wait while roaming unless you allow it.
+- Long texts can go as one MMS instead of a string of SMS, so they arrive whole and in order.
+  Your carrier's setting is used until you change it.
+- Reply straight from the notification, to one person or a group. Pictures show in the
+  notification, scaled down.
 - Drafts are saved as you type and come back when you open the conversation.
 - Schedule a message: long-press send to pick a date and time.
 - Set a send delay, so a message can be cancelled in the seconds before it goes out.
@@ -29,9 +40,10 @@ goes through Google.
 - Star messages to find them later, and copy or forward them.
 
 ### Privacy
-- No internet permission, so the app cannot send your messages anywhere.
+- No internet permission, so the app cannot send your messages anywhere. MMS are sent and
+  downloaded by Android's MMS service over your mobile data, not by the app.
 - Lock a conversation or single messages behind your screen lock. Locked text stays hidden in
-  the list, in notifications and in search.
+  the list, in notifications and in search, and their pictures stay out of notifications.
 - One-time codes are underlined, and a tap copies them. A notification with a code offers a
   Copy code button.
 - Block numbers.
@@ -44,9 +56,11 @@ goes through Google.
 
 ### Backup and import
 - Back up all your messages to a file anywhere the file picker reaches, including SD cards
-  and cloud folders. The file is encrypted with a PIN you choose.
+  and cloud folders. The file is encrypted with a PIN you choose. Pictures and attachments
+  go in too, unless you untick them for a smaller file.
 - Restore a backup on the same phone or a new one.
-- Import messages from SMS Import / Export and QKSMS backups.
+- Import messages from SMS Import / Export, picture messages included, and from QKSMS
+  backups.
 
 ### Look and accessibility
 - Colours from your wallpaper, or Budstikke's own dark, light and true black themes, with an
@@ -54,9 +68,6 @@ goes through Google.
 - Accessibility mode: high contrast, larger text, larger touch targets and reduced motion,
   each of which can be turned off on its own, and descriptions for TalkBack.
 - Choose whether the name under the icon is Budstikke or Messages.
-
-### Not yet
-- MMS: picture and group messages can't be sent, and existing ones are not shown.
 
 ## Install
 
@@ -99,3 +110,6 @@ gh attestation verify Budstikke-X.Y.Z.apk --repo AalmanSadath/Budstikke
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE).
+
+The code that reads and writes MMS messages comes from the Android Open Source Project and
+is under the Apache License 2.0. See [NOTICE](NOTICE).
