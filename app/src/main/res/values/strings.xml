@@ -183,6 +183,7 @@
     <string name="backup_messages">Back up messages</string>
     <string name="restore_backup">Restore from a backup</string>
     <string name="backup_pin_title">PIN for this backup</string>
+    <string name="backup_include_attachments">Include pictures and attachments</string>
     <string name="backup_pin_hint">At least 6 digits or letters. Longer is safer: anyone with the file can try PINs as fast as their computer allows. Without the PIN the backup cannot be opened, not even by this app.</string>
     <string name="restore_pin_title">PIN of the backup</string>
     <string name="backup_pin">PIN</string>
@@ -222,8 +223,8 @@
     <string name="import_running">Importing…</string>
     <string name="import_done_title">Import finished</string>
     <plurals name="import_mms_skipped">
-        <item quantity="one">%1$d MMS was skipped: Budstikke handles SMS only for now.</item>
-        <item quantity="other">%1$d MMS were skipped: Budstikke handles SMS only for now.</item>
+        <item quantity="one">%1$d MMS could not be brought in. MMS come in only from SMS Import / Export\'s .zip.</item>
+        <item quantity="other">%1$d MMS could not be brought in. MMS come in only from SMS Import / Export\'s .zip.</item>
     </plurals>
     <plurals name="import_unreadable">
         <item quantity="one">%1$d entry could not be read and was left out.</item>

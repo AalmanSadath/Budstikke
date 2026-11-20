@@ -56,6 +56,28 @@ class MmsRecord(
     val others: List<String>
         get() = if (box == Mms.MESSAGE_BOX_INBOX) listOfNotNull(from) else to + cc
 
+    /** The same message filed in [box]. */
+    fun inBox(box: Int): MmsRecord = copy(box = box)
+
+    /**
+     * The same message without the bytes of its pictures and files: their parts stay, so
+     * it still shows what it carried, but as empty placeholders. Its text and layout stay.
+     */
+    fun textOnly(): MmsRecord = copy(
+        parts = parts.map { p ->
+            if (p.text != null || p.contentType == MmsStore.SMIL) {
+                p
+            } else {
+                MmsPartRecord(p.contentType, p.name, p.contentLocation, p.contentId, p.charset)
+            }
+        },
+    )
+
+    private fun copy(box: Int = this.box, parts: List<MmsPartRecord> = this.parts) = MmsRecord(
+        box, messageType, dateSeconds, dateSentSeconds, read, seen, subscriptionId, from, to, cc, subject, messageId,
+        transactionId, contentType, parts, contentLocation, messageSize, expirySeconds,
+    )
+
     /**
      * Who the conversation is with, given this phone's [own] numbers. A received message
      * sent to several people is a group: its sender and everyone else it went to. This

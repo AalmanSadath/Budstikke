@@ -13,8 +13,16 @@ import dev.aalman.budstikke.data.Flags
 import dev.aalman.budstikke.data.Locks
 import dev.aalman.budstikke.data.Marks
 import dev.aalman.budstikke.data.Outgoing
+import dev.aalman.budstikke.data.MessageKey
+import dev.aalman.budstikke.data.MmsReader
 import dev.aalman.budstikke.data.restoredType
+import dev.aalman.budstikke.mms.pdu.PduHeaders
+import dev.aalman.budstikke.sms.MmsStore
 import dev.aalman.budstikke.sms.activeSims
+import java.io.File
+import java.security.DigestInputStream
+import java.security.DigestOutputStream
+import java.security.MessageDigest
 
 /** Work done so far out of the whole, for a progress bar. [total] is 0 while it is not known yet. */
 typealias Progress = (done: Int, total: Int) -> Unit
@@ -44,15 +52,27 @@ class Backup(context: Context) {
     private val context = context.applicationContext
     private val resolver = this.context.contentResolver
 
-    /** Saves a backup to [uri], then reads it back and opens it to check it was written whole. Returns the message count. */
-    fun write(uri: Uri, pin: CharArray, progress: Progress): Int {
-        val content = collect(progress)
-        val plain = BackupFormat.write(content)
-        val sealed = BackupCrypto.seal(plain, pin)
-        resolver.openOutputStream(uri, "wt")?.use { it.write(sealed) } ?: throw java.io.IOException("No output stream")
-        val back = resolver.openInputStream(uri)?.use { it.readBytes() } ?: throw java.io.IOException("No input stream")
-        if (!BackupCrypto.open(back, pin).contentEquals(plain)) throw java.io.IOException("Backup did not read back the same")
-        return content.messages.size
+    /**
+     * Saves a backup to [uri], then reads it back and opens it to check it was written
+     * whole. Without [withAttachments], MMS keep their text and lose their pictures and
+     * files. Returns the message count.
+     */
+    fun write(uri: Uri, pin: CharArray, withAttachments: Boolean, progress: Progress): Int {
+        val written = MessageDigest.getInstance("SHA-256")
+        val count = resolver.openOutputStream(uri, "wt")?.use { raw ->
+            BackupWriter(DigestOutputStream(BackupCrypto.sealing(raw, pin), written), System.currentTimeMillis()).use { out ->
+                collect(out, withAttachments, progress)
+            }
+        } ?: throw java.io.IOException("No output stream")
+        val read = MessageDigest.getInstance("SHA-256")
+        resolver.openInputStream(uri)?.use { raw ->
+            DigestInputStream(BackupCrypto.opening(raw, pin), read).use { input ->
+                val buffer = ByteArray(BackupCrypto.CHUNK_BYTES)
+                while (input.read(buffer) >= 0) Unit
+            }
+        } ?: throw java.io.IOException("No input stream")
+        if (!read.digest().contentEquals(written.digest())) throw java.io.IOException("Backup did not read back the same")
+        return count
     }
 
     /**
@@ -60,25 +80,70 @@ class Backup(context: Context) {
      * before anything is written, so a wrong PIN or a damaged file changes nothing.
      */
     fun restore(uri: Uri, pin: CharArray, progress: Progress): RestoreResult {
-        val sealed = resolver.openInputStream(uri)?.use { it.readBytes() } ?: throw java.io.IOException("No input stream")
-        val content = BackupFormat.read(BackupCrypto.open(sealed, pin))
-        return apply(content, progress)
+        val start = resolver.openInputStream(uri)?.use { input ->
+            ByteArray(BackupCrypto.MAGIC_BYTES).let { it.copyOf(maxOf(0, java.io.DataInputStream(input).read(it))) }
+        } ?: throw java.io.IOException("No input stream")
+        if (!BackupCrypto.isChunked(start)) {
+            // A backup from before chunking holds no MMS and opens whole.
+            val sealed = resolver.openInputStream(uri)?.use { it.readBytes() } ?: throw java.io.IOException("No input stream")
+            val content = BackupFormat.read(BackupCrypto.open(sealed, pin))
+            return apply({ onMms -> content.mms.forEach(onMms); content }, content.mms.size, progress)
+        }
+        // The first read checks every chunk and line; only the second writes anything.
+        val keys = HashMap<String, javax.crypto.spec.SecretKeySpec>()
+        progress(0, 0)
+        var mmsCount = 0
+        readChunked(uri, pin, keys) { mmsCount++ }
+        return apply({ onMms -> readChunked(uri, pin, keys, onMms) }, mmsCount, progress)
     }
 
-    /** Adds the SMS in another app's backup at [uri]; its MMS are counted and left out. */
+    private fun readChunked(
+        uri: Uri,
+        pin: CharArray,
+        keys: MutableMap<String, javax.crypto.spec.SecretKeySpec>,
+        onMms: (BackupMms) -> Unit,
+    ): BackupContent = resolver.openInputStream(uri)?.use { raw ->
+        BackupFormat.read(BackupCrypto.opening(raw, pin, keys), onMms = onMms)
+    } ?: throw java.io.IOException("No input stream")
+
+    /**
+     * Adds the messages in another app's backup at [uri]. MMS come in with their pictures
+     * from SMS Import / Export's ZIP; those that cannot be read are counted and left out.
+     */
     fun import(uri: Uri, source: ImportSource, progress: Progress): ImportResult {
         progress(0, 0)
-        val parsed = resolver.openInputStream(uri)?.use { Importers.parse(source, it) } ?: throw java.io.IOException("No input stream")
-        val (inserted, _) = insertMessages(parsed.messages, progress)
-        return ImportResult(inserted.added, inserted.alreadyHere, parsed.mms, parsed.unreadable)
+        val scratch = File(context.cacheDir, "import").apply { deleteRecursively() }
+        try {
+            val mms = MmsInserter()
+            val parsed = resolver.openInputStream(uri)?.use { input ->
+                Importers.parse(source, input, scratch) { record ->
+                    mms.add(BackupMms(record))
+                    progress(mms.added + mms.alreadyHere, 0)
+                }
+            } ?: throw java.io.IOException("No input stream")
+            val (inserted, _) = insertMessages(parsed.messages, progress)
+            mms.finish()
+            return ImportResult(inserted.added + mms.added, inserted.alreadyHere + mms.alreadyHere, parsed.mms, parsed.unreadable)
+        } finally {
+            scratch.deleteRecursively()
+        }
     }
 
-    private fun collect(progress: Progress): BackupContent {
+    /** Writes everything into [out], one record at a time. Returns the message count. */
+    private fun collect(out: BackupWriter, withAttachments: Boolean, progress: Progress): Int {
         progress(0, 0)
         val locks = Locks.get(context).state()
         val marks = Marks.get(context).state()
         val threadAddress = HashMap<Long, String>()
-        val messages = ArrayList<BackupSms>()
+        val mmsIds = resolver.query(
+            Telephony.Mms.CONTENT_URI, arrayOf(Telephony.Mms._ID),
+            // Messages only: not drafts, delivery or read reports, or notifications of a
+            // message still at the carrier, which will have expired by any restore.
+            "${Telephony.Mms.MESSAGE_TYPE} IN (${PduHeaders.MESSAGE_TYPE_SEND_REQ}, ${PduHeaders.MESSAGE_TYPE_RETRIEVE_CONF}) " +
+                "AND ${Telephony.Mms.MESSAGE_BOX} != ${Telephony.Mms.MESSAGE_BOX_DRAFTS}",
+            null, "${Telephony.Mms.DATE} ASC",
+        )?.use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }.orEmpty()
+        var done = 0
         resolver.query(
             Telephony.Sms.CONTENT_URI,
             arrayOf(
@@ -88,47 +153,81 @@ class Backup(context: Context) {
             ),
             null, null, "${Telephony.Sms.DATE} ASC",
         )?.use { c ->
+            val total = c.count + mmsIds.size
             while (c.moveToNext()) {
                 val id = c.getLong(0)
                 val address = c.getString(2) ?: continue
                 threadAddress.putIfAbsent(c.getLong(1), address)
-                messages += BackupSms(
-                    address = address,
-                    body = c.getString(3).orEmpty(),
-                    dateMillis = c.getLong(4),
-                    dateSentMillis = c.getLong(5),
-                    type = c.getInt(6),
-                    read = c.getInt(7) != 0,
-                    seen = c.getInt(8) != 0,
-                    status = c.getInt(9),
-                    subscriptionId = c.getInt(10),
-                    locked = id in locks.messages,
-                    starred = id in marks.starred,
-                    reaction = marks.reactions[id],
+                out.sms(
+                    BackupSms(
+                        address = address,
+                        body = c.getString(3).orEmpty(),
+                        dateMillis = c.getLong(4),
+                        dateSentMillis = c.getLong(5),
+                        type = c.getInt(6),
+                        read = c.getInt(7) != 0,
+                        seen = c.getInt(8) != 0,
+                        status = c.getInt(9),
+                        subscriptionId = c.getInt(10),
+                        locked = id in locks.messages,
+                        starred = id in marks.starred,
+                        reaction = marks.reactions[id],
+                    ),
                 )
-                if (messages.size % PROGRESS_STEP == 0) progress(messages.size, c.count)
+                if (++done % PROGRESS_STEP == 0) progress(done, total)
             }
+        }
+        val store = MmsStore(context)
+        val total = done + mmsIds.size
+        for (rowId in mmsIds) {
+            val record = store.read(rowId) ?: continue
+            val key = MessageKey.mms(rowId)
+            out.mms(
+                BackupMms(
+                    if (withAttachments) record else record.textOnly(),
+                    locked = key in locks.messages,
+                    starred = key in marks.starred,
+                    reaction = marks.reactions[key],
+                ),
+            )
+            if (++done % MMS_PROGRESS_STEP == 0) progress(done, total)
+        }
+        progress(done, total)
+        // Threads with only MMS, groups among them, are named by the store's record of them.
+        MmsReader(resolver).threadRecipients().forEach { (threadId, addresses) ->
+            if (addresses.isNotEmpty()) threadAddress.putIfAbsent(threadId, AddressList.join(addresses))
         }
         val flags = ConversationFlags.get(context).all()
         val drafts = Drafts.get(context).all()
         val outgoing = Outgoing.get(context).due(Long.MAX_VALUE).filter { !it.delayed }
         // A conversation known only by a draft or a schedule has no messages to name it.
         outgoing.forEach { threadAddress.putIfAbsent(it.threadId, it.address) }
-        val conversations = (flags.keys + drafts.keys + locks.threads).mapNotNull { threadId ->
-            val address = threadAddress[threadId] ?: return@mapNotNull null
+        (flags.keys + drafts.keys + locks.threads).forEach { threadId ->
+            val address = threadAddress[threadId] ?: return@forEach
             val f = flags[threadId] ?: Flags()
-            BackupConversation(address, f.pinnedAt, f.archived, threadId in locks.threads, drafts[threadId])
+            out.conversation(BackupConversation(address, f.pinnedAt, f.archived, threadId in locks.threads, drafts[threadId]))
         }
-        return BackupContent(
-            createdAtMillis = System.currentTimeMillis(),
-            messages = messages,
-            conversations = conversations,
-            blocked = BlockList.get(context).all().map(::BackupBlocked),
-            scheduled = outgoing.map { BackupScheduled(it.address, it.body, it.subscriptionId, it.sendAtMillis) },
-        )
+        BlockList.get(context).all().forEach { out.blocked(BackupBlocked(it)) }
+        outgoing.forEach { out.scheduled(BackupScheduled(it.address, it.body, it.subscriptionId, it.sendAtMillis)) }
+        return done
     }
 
-    private fun apply(content: BackupContent, progress: Progress): RestoreResult {
+    /**
+     * [read] reads the content, handing each MMS to the function it is given; MMS are
+     * written into the store as they come, the rest once the read is done.
+     */
+    private fun apply(read: ((BackupMms) -> Unit) -> BackupContent, mmsTotal: Int, progress: Progress): RestoreResult {
+        val mms = MmsInserter()
+        val content = read { m ->
+            mms.add(m)
+            val done = mms.added + mms.alreadyHere
+            if (done % MMS_PROGRESS_STEP == 0 || done == mmsTotal) progress(done, mmsTotal)
+        }
+        mms.finish()
+        return applyRest(content, mms, progress)
+    }
+
+    private fun applyRest(content: BackupContent, mms: MmsInserter, progress: Progress): RestoreResult {
         val (inserted, ids) = insertMessages(content.messages, progress)
         val marks = Marks.get(context)
         val locks = Locks.get(context)
@@ -175,7 +274,7 @@ class Backup(context: Context) {
             val sub = if (s.subscriptionId in sims) s.subscriptionId else SubscriptionManager.INVALID_SUBSCRIPTION_ID
             outgoing.add(threadId, addresses, s.body, sub, s.sendAtMillis, delayed = false)
         }
-        return RestoreResult(inserted.added, inserted.alreadyHere, past)
+        return RestoreResult(inserted.added + mms.added, inserted.alreadyHere + mms.alreadyHere, past)
     }
 
     /**
@@ -226,9 +325,76 @@ class Backup(context: Context) {
 
     private fun BackupSms.key() = messageKey(address, dateMillis, isOutgoing(type), body)
 
+    /**
+     * Writes MMS into the store, skipping any already there by date, direction and text, as
+     * SMS are, then puts back their locks, stars and reactions in [finish].
+     */
+    private inner class MmsInserter {
+        private val store = MmsStore(context)
+        private val existing = existingMmsKeys()
+        private val locked = ArrayList<Long>()
+        private val starred = ArrayList<Long>()
+        private val reactions = HashMap<Long, String>()
+        var added = 0
+            private set
+        var alreadyHere = 0
+            private set
+
+        fun add(m: BackupMms) {
+            val key = mmsKey(m.record)
+            if (key in existing) {
+                alreadyHere++
+                return
+            }
+            // Something that was still going out when backed up did not go: it comes back failed.
+            val record = if (m.record.box == Telephony.Mms.MESSAGE_BOX_OUTBOX) m.record.inBox(Telephony.Mms.MESSAGE_BOX_FAILED) else m.record
+            val id = store.insert(record) ?: return
+            existing += key
+            added++
+            val messageKey = MessageKey.mms(id)
+            if (m.locked) locked += messageKey
+            if (m.starred) starred += messageKey
+            m.reaction?.let { reactions[messageKey] = it }
+        }
+
+        fun finish() {
+            val marks = Marks.get(context)
+            val have = marks.state().reactions
+            reactions.forEach { (id, emoji) -> if (id !in have) marks.setReaction(id, emoji) }
+            marks.setStarred(starred, true)
+            Locks.get(context).setMessagesLocked(locked, true)
+        }
+    }
+
+    /** What identifies each MMS already in the store, as [mmsKey] makes it. */
+    private fun existingMmsKeys(): MutableSet<String> {
+        val texts = HashMap<Long, StringBuilder>()
+        resolver.query(
+            Telephony.Mms.Part.CONTENT_URI, arrayOf(Telephony.Mms.Part.MSG_ID, Telephony.Mms.Part.TEXT),
+            "${Telephony.Mms.Part.CONTENT_TYPE} = ?", arrayOf(MmsStore.TEXT_PLAIN), "${Telephony.Mms.Part.SEQ} ASC",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val text = texts.getOrPut(c.getLong(0)) { StringBuilder() }
+                if (text.isNotEmpty()) text.append('\n')
+                text.append(c.getString(1).orEmpty())
+            }
+        }
+        val keys = HashSet<String>()
+        resolver.query(
+            Telephony.Mms.CONTENT_URI, arrayOf(Telephony.Mms._ID, Telephony.Mms.DATE, Telephony.Mms.MESSAGE_BOX),
+            null, null, null,
+        )?.use { c ->
+            while (c.moveToNext()) {
+                keys += mmsKey(c.getLong(1), c.getInt(2) != Telephony.Mms.MESSAGE_BOX_INBOX, texts[c.getLong(0)]?.toString().orEmpty())
+            }
+        }
+        return keys
+    }
+
     private fun isOutgoing(type: Int) = type != Telephony.Sms.MESSAGE_TYPE_INBOX
 
     private companion object {
         const val PROGRESS_STEP = 25
+        const val MMS_PROGRESS_STEP = 5
     }
 }

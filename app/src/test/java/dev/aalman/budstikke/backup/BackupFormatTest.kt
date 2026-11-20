@@ -1,5 +1,8 @@
 package dev.aalman.budstikke.backup
 
+import dev.aalman.budstikke.sms.MmsPartRecord
+import dev.aalman.budstikke.sms.MmsRecord
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -29,6 +32,41 @@ class BackupFormatTest {
     fun roundTripsThroughTheSealedFile() {
         val sealed = BackupCrypto.seal(BackupFormat.write(content), "letmein1".toCharArray(), iterations = 1_000)
         assertEquals(content, BackupFormat.read(BackupCrypto.open(sealed, "letmein1".toCharArray())))
+    }
+
+    @Test
+    fun carriesMmsWithTheirPartsAndMarks() {
+        val record = MmsRecord(
+            box = 1, messageType = 132, dateSeconds = 1_700_000_000, read = true, seen = true, subscriptionId = 1,
+            from = "+4741234567", to = listOf("+4790000000", "+4791111111"),
+            parts = listOf(
+                MmsPartRecord("image/jpeg", name = "a.jpg", data = byteArrayOf(1, 2, 3)),
+                MmsPartRecord("text/plain", text = "Bilde"),
+            ),
+        )
+        val back = BackupFormat.read(BackupFormat.write(content.copy(mms = listOf(BackupMms(record, starred = true, reaction = "👍")))))
+        val m = back.mms.single()
+        assertEquals(true, m.starred)
+        assertEquals("👍", m.reaction)
+        assertEquals(listOf("+4790000000", "+4791111111"), m.record.to)
+        assertEquals(listOf<Byte>(1, 2, 3), m.record.parts[0].data?.toList())
+        assertEquals(mmsKey(record), mmsKey(m.record))
+        assertEquals(content.messages, back.messages)
+    }
+
+    @Test
+    fun withoutAttachmentsAnMmsKeepsItsTextAndPlaceholders() {
+        val record = MmsRecord(
+            box = 2, messageType = 128, dateSeconds = 1, read = true, seen = true, subscriptionId = 1,
+            from = null, to = listOf("+4790000000"),
+            parts = listOf(
+                MmsPartRecord("image/jpeg", name = "a.jpg", data = byteArrayOf(1, 2, 3)),
+                MmsPartRecord("text/plain", text = "Bilde"),
+            ),
+        ).textOnly()
+        assertEquals(null, record.parts[0].data)
+        assertEquals("a.jpg", record.parts[0].name)
+        assertEquals("Bilde", record.parts[1].text)
     }
 
     @Test(expected = NotABackupException::class)

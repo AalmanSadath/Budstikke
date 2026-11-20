@@ -3,14 +3,23 @@ package dev.aalman.budstikke.backup
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import dev.aalman.budstikke.mms.pdu.CharacterSets
+import dev.aalman.budstikke.mms.pdu.PduHeaders
+import dev.aalman.budstikke.sms.MmsPartRecord
+import dev.aalman.budstikke.sms.MmsRecord
+import dev.aalman.budstikke.sms.MmsStore
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /** Another app's backup that messages can be imported from. */
 enum class ImportSource { SmsImportExport, Qksms }
 
-/** What a file held: its SMS, and how many entries were MMS or could not be read. */
+/**
+ * What a file held: its SMS, how many MMS were left out because they could not be brought
+ * in, and how many entries could not be read at all.
+ */
 data class ParsedImport(val messages: List<BackupSms>, val mms: Int, val unreadable: Int)
 
 /** The file is too big to read whole; only SMS Import / Export's ZIP is read a line at a time. */
@@ -23,7 +32,10 @@ class ImportTooLargeException : Exception()
  * SMS Import / Export (2.0 and later) saves a ZIP holding `messages.ndjson`: one JSON object
  * per line, SMS first, then MMS, with Android's own message column names (`address`,
  * `body`, `date`, `type` and so on) and values that may be strings. MMS lines carry keys it
- * adds, such as `__parts` and `__sender_address`. Its 1.x versions saved one JSON file.
+ * adds: `__sender_address`, an address row; `__recipient_addresses`, a list of them; and
+ * `__parts`, the part rows. A part's bytes are a file in the ZIP's `data/` folder, named as
+ * the last segment of the part's `_data` path. Its 1.x versions saved one JSON file, whose
+ * MMS are left out.
  *
  * QKSMS saves one JSON file with a list of messages. Its layout is not published, so this
  * reads any list of message objects in the file, accepting the usual spellings of each
@@ -34,7 +46,15 @@ object Importers {
     /** The most read into memory at once for a file that is not read line by line. */
     const val MAX_WHOLE_BYTES = 100L * 1024 * 1024
 
-    fun parse(source: ImportSource, input: InputStream): ParsedImport {
+    /** The largest part file brought in from an import; larger ones are left out of their message. */
+    const val MAX_PART_BYTES = 20L * 1024 * 1024
+
+    /**
+     * Reads [input]. With [scratch], an empty folder to work in, and [onMms], MMS in a ZIP
+     * come in with their files and are handed to [onMms] one at a time; otherwise every
+     * MMS is counted and left out.
+     */
+    fun parse(source: ImportSource, input: InputStream, scratch: File? = null, onMms: ((MmsRecord) -> Unit)? = null): ParsedImport {
         val stream = BufferedInputStream(input)
         stream.mark(4)
         val start = ByteArray(2).let { if (stream.read(it) == 2) it else ByteArray(0) }
@@ -42,7 +62,7 @@ object Importers {
         val zipped = start.size == 2 && start[0] == 'P'.code.toByte() && start[1] == 'K'.code.toByte()
         val out = Collector()
         // Either source may come zipped; SMS Import / Export's always is.
-        if (zipped) readZip(stream, out) else readText(readLimited(stream), out)
+        if (zipped) readZip(stream, out, scratch?.takeIf { onMms != null }, onMms) else readText(readLimited(stream), out)
         if (source == ImportSource.Qksms && out.messages.isEmpty() && out.mms == 0 && out.unreadable == 0) {
             throw NotABackupException()
         }
@@ -54,40 +74,47 @@ object Importers {
         var mms = 0
         var unreadable = 0
         var sawAny = false
+        /** Turns an MMS line into a message, when its files are at hand. */
+        var mmsReader: ((JSONObject) -> Boolean)? = null
 
         fun add(o: JSONObject, mmsList: Boolean = false) {
             sawAny = true
             when (val r = record(o, mmsList)) {
-                Record.Mms -> mms++
+                Record.Mms -> if (mmsReader?.invoke(o) != true) mms++
                 Record.Unreadable -> unreadable++
                 is Record.Sms -> messages += r.sms
             }
         }
     }
 
-    private fun readZip(input: InputStream, out: Collector) {
+    /**
+     * Reads a ZIP. With [scratch], the message lines and the `data/` files are copied out
+     * first, since the ZIP may hold them in either order, and read from there.
+     */
+    private fun readZip(input: InputStream, out: Collector, scratch: File?, onMms: ((MmsRecord) -> Unit)?) {
         val zip = ZipInputStream(input)
         var found = false
+        val lines = ArrayList<File>()
+        val data = scratch?.let { File(it, "data") }
         while (true) {
             val entry = zip.nextEntry ?: break
             val name = entry.name.substringAfterLast('/')
             when {
                 entry.isDirectory -> Unit
+                data != null && entry.name.trimStart('/').startsWith("data/") -> {
+                    // Only a plain file name is used, so nothing lands outside the folder.
+                    if (safeName(name)) copyLimited(zip, File(data.apply { mkdirs() }, name), MAX_PART_BYTES)
+                }
+                name.endsWith(".ndjson") && scratch != null -> {
+                    found = true
+                    val copy = File(scratch.apply { mkdirs() }, "messages${lines.size}.ndjson")
+                    copy.outputStream().use { zip.copyTo(it) }
+                    lines += copy
+                }
                 name.endsWith(".ndjson") -> {
                     found = true
                     // Not closed: closing would close the ZIP with it.
-                    val reader = zip.bufferedReader(Charsets.UTF_8)
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        if (line.isBlank()) continue
-                        val o = try {
-                            JSONObject(line)
-                        } catch (_: JSONException) {
-                            out.unreadable++
-                            continue
-                        }
-                        out.add(o)
-                    }
+                    readLines(zip.bufferedReader(Charsets.UTF_8), out)
                 }
                 name.endsWith(".json") -> {
                     found = true
@@ -96,7 +123,116 @@ object Importers {
             }
         }
         if (!found) throw NotABackupException()
+        if (data != null && onMms != null) {
+            out.mmsReader = { o -> smsIeMms(o, data)?.let(onMms) != null }
+        }
+        lines.forEach { file -> file.bufferedReader(Charsets.UTF_8).use { readLines(it, out) } }
     }
+
+    private fun readLines(reader: java.io.BufferedReader, out: Collector) {
+        while (true) {
+            val line = reader.readLine() ?: break
+            if (line.isBlank()) continue
+            val o = try {
+                JSONObject(line)
+            } catch (_: JSONException) {
+                out.unreadable++
+                continue
+            }
+            out.add(o)
+        }
+    }
+
+    private fun safeName(name: String) = name.matches(Regex("[A-Za-z0-9._-]{1,128}")) && name != "." && name != ".."
+
+    /** Copies at most [limit] bytes; a larger file is not kept. */
+    private fun copyLimited(input: InputStream, to: File, limit: Long) {
+        var written = 0L
+        to.outputStream().use { output ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                written += n
+                if (written > limit) break
+                output.write(buffer, 0, n)
+            }
+        }
+        if (written > limit) to.delete()
+    }
+
+    /**
+     * One SMS Import / Export MMS line as a message, its part bytes read from [data], or
+     * null when it is not a message that can be brought in: a report, a notification of one
+     * never downloaded, or one with nothing in it.
+     */
+    internal fun smsIeMms(o: JSONObject, data: File): MmsRecord? {
+        val box = o.long("msg_box")?.toInt() ?: return null
+        if (box !in MMS_BOXES) return null
+        val inbox = box == MMS_BOX_INBOX
+        val type = o.long("m_type")?.toInt() ?: if (inbox) PduHeaders.MESSAGE_TYPE_RETRIEVE_CONF else PduHeaders.MESSAGE_TYPE_SEND_REQ
+        if (type != PduHeaders.MESSAGE_TYPE_RETRIEVE_CONF && type != PduHeaders.MESSAGE_TYPE_SEND_REQ) return null
+        // MMS dates are seconds in Android's store; take milliseconds too, should a file hold them.
+        fun seconds(v: Long?) = v?.let { if (it > 100_000_000_000L) it / 1000 else it }
+        val date = seconds(o.long("date")) ?: return null
+        val from = o.optJSONObject("__sender_address")?.text("address")?.takeIf { it.isNotBlank() && it != INSERT_ADDRESS_TOKEN }
+        val to = ArrayList<String>()
+        val cc = ArrayList<String>()
+        o.optJSONArray("__recipient_addresses")?.let { list ->
+            for (i in 0 until list.length()) {
+                val a = list.optJSONObject(i) ?: continue
+                val address = a.text("address")?.takeIf { it.isNotBlank() && it != INSERT_ADDRESS_TOKEN } ?: continue
+                if (a.long("type")?.toInt() == PduHeaders.CC || a.long("type")?.toInt() == PduHeaders.BCC) cc += address else to += address
+            }
+        }
+        if (from == null && to.isEmpty() && cc.isEmpty()) return null
+        val parts = ArrayList<MmsPartRecord>()
+        o.optJSONArray("__parts")?.let { list ->
+            for (i in 0 until list.length()) {
+                val p = list.optJSONObject(i) ?: continue
+                val contentType = p.text("ct")?.lowercase()?.takeIf { it.isNotBlank() } ?: continue
+                val file = p.text("_data")?.substringAfterLast('/')?.takeIf(::safeName)?.let { File(data, it) }?.takeIf { it.isFile }
+                val charset = p.long("chset")?.toInt()?.takeIf { it > 0 } ?: CharacterSets.UTF_8
+                val isText = contentType == MmsStore.TEXT_PLAIN
+                parts += MmsPartRecord(
+                    contentType = contentType,
+                    name = p.text("name") ?: p.text("fn"),
+                    contentLocation = p.text("cl"),
+                    contentId = p.text("cid"),
+                    charset = charset,
+                    text = if (isText) p.text("text") ?: file?.let { MmsStore.decode(it.readBytes(), charset) } else null,
+                    data = when {
+                        isText -> null
+                        contentType == MmsStore.SMIL -> (p.text("text") ?: file?.readText())?.toByteArray()
+                        else -> file?.readBytes()
+                    },
+                )
+            }
+        }
+        if (parts.none { it.text != null || it.data != null }) return null
+        return MmsRecord(
+            box = box,
+            messageType = type,
+            dateSeconds = date,
+            dateSentSeconds = seconds(o.long("date_sent")) ?: 0,
+            read = o.flag("read") ?: true,
+            seen = o.flag("seen") ?: true,
+            subscriptionId = (o.long("sub_id") ?: -1).toInt(),
+            from = from,
+            to = to,
+            cc = cc,
+            subject = o.text("sub"),
+            messageId = o.text("m_id"),
+            transactionId = o.text("tr_id"),
+            contentType = o.text("ct_t"),
+            parts = parts,
+        )
+    }
+
+    private const val MMS_BOX_INBOX = 1
+    /** Inbox, sent, outbox and failed; drafts are left out. */
+    private val MMS_BOXES = setOf(1, 2, 4, 5)
+    private const val INSERT_ADDRESS_TOKEN = "insert-address-token"
 
     private fun readLimited(input: InputStream): String {
         val out = java.io.ByteArrayOutputStream()
