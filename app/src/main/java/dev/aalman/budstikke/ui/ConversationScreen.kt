@@ -15,7 +15,13 @@ import androidx.compose.ui.text.style.TextDecoration
 import dev.aalman.budstikke.sms.findOneTimeCode
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.foundation.background
@@ -37,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.delay
@@ -141,6 +148,10 @@ fun ConversationScreen(
     onBack: () -> Unit,
     onShowDetails: () -> Unit = {},
     onCopyCode: (String) -> Unit = {},
+    /** Opens a web address, email address or phone number from a message. */
+    onOpenLink: (TextLink) -> Unit = {},
+    /** Copies a link's address, from the dialog shown before a web link opens. */
+    onCopyLink: (String) -> Unit = {},
     locks: LockState = LockState(),
     threadId: Long = -1,
     unlocked: Boolean = true,
@@ -161,6 +172,22 @@ fun ConversationScreen(
     onRemoveAttachment: (String) -> Unit = {},
 ) {
     val group = members.size > 1
+    // A web link waiting for Open, Copy or Cancel.
+    var confirmingLink by remember { mutableStateOf<TextLink?>(null) }
+    confirmingLink?.let { link ->
+        LinkDialog(
+            link,
+            onOpen = {
+                confirmingLink = null
+                onOpenLink(link)
+            },
+            onCopy = {
+                confirmingLink = null
+                onCopyLink(link.target)
+            },
+            onDismiss = { confirmingLink = null },
+        )
+    }
     // The picture opened from a bubble, over the whole screen.
     var viewing by remember { mutableStateOf<Attachment?>(null) }
     viewing?.let { PhotoViewer(it) { viewing = null } }
@@ -338,6 +365,9 @@ fun ConversationScreen(
                         },
                         // While selecting, a tap on the code selects like a tap anywhere else.
                         onCopyCode = if (selecting) null else onCopyCode,
+                        // Web links ask first, showing where they really go; the dialer and
+                        // the mail app ask for themselves.
+                        onOpenLink = if (selecting) null else { link -> if (link.kind == LinkKind.Web) confirmingLink = link else onOpenLink(link) },
                         onClick = {
                             when {
                                 barFor != null -> selected = emptySet()
@@ -412,6 +442,31 @@ private fun SenderRow(from: Member?, place: BubblePlace, bubble: @Composable () 
 }
 
 private val SENDER_AVATAR = 28.dp
+
+/**
+ * Asks before a web link opens, showing the whole address with the site it really goes to
+ * in bold, so a look-alike domain has a chance to be noticed.
+ */
+@Composable
+private fun LinkDialog(link: TextLink, onOpen: () -> Unit, onCopy: () -> Unit, onDismiss: () -> Unit) {
+    val address = buildAnnotatedString {
+        append(link.target)
+        val host = hostRange(link.target)
+        if (host != null) addStyle(SpanStyle(fontWeight = FontWeight.Bold), host.first, host.last + 1)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.link_open_title)) },
+        text = { Text(address) },
+        confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCopy) { Text(stringResource(R.string.link_copy)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        },
+    )
+}
 
 /** What can be done to a message that has not gone out yet. */
 enum class PendingAction { SendNow, ChangeTime, Edit, Cancel }
@@ -550,6 +605,8 @@ private fun Bubble(
     reactionBar: Boolean,
     onReact: (String) -> Unit,
     onCopyCode: ((String) -> Unit)?,
+    /** Opens a link in the text; null while selecting, when a tap selects instead. */
+    onOpenLink: ((TextLink) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     place: BubblePlace,
@@ -614,23 +671,61 @@ private fun Bubble(
     // bubbles and in the text colour on this side's, which are already the accent.
     val code = remember(message.body, hidden) { if (hidden) null else findOneTimeCode(message.body) }
     val linkColour = if (outgoing || failed) textColour else MaterialTheme.colorScheme.primary
+    // A link takes the touch from the bubble and reacts on release however long it was
+    // held, so the text notes when each press began and ended: one held past the long-press
+    // time selects the message, as anywhere else on the bubble, instead of opening it.
+    val press = remember { LongArray(2) }
+    val longPressMillis = LocalViewConfiguration.current.longPressTimeoutMillis
+    val heldLong = { press[1] - press[0] >= longPressMillis }
+    // Web addresses, email addresses and phone numbers read as links too, underlined but not
+    // bold, so the code stays the one that stands out. None while locked or selecting.
+    val links = remember(message.body, hidden, code) {
+        if (hidden) emptyList() else findLinks(message.body, avoid = code?.range)
+    }
     val shown = (if (hidden) AnnotatedString(body) else markMatches(message.body, highlight, marked)).let { base ->
-        if (code == null || onCopyCode == null) return@let base
+        val withCode = code != null && onCopyCode != null
+        val withLinks = links.isNotEmpty() && onOpenLink != null
+        if (!withCode && !withLinks) return@let base
         buildAnnotatedString {
             append(base)
-            addLink(
-                LinkAnnotation.Clickable(
-                    tag = "one-time-code",
-                    styles = TextLinkStyles(
-                        SpanStyle(color = linkColour, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline),
-                    ),
-                ) { onCopyCode(code.code) },
-                code.range.first,
-                code.range.last + 1,
-            )
+            if (withCode) {
+                addLink(
+                    LinkAnnotation.Clickable(
+                        tag = "one-time-code",
+                        styles = TextLinkStyles(
+                            SpanStyle(color = linkColour, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline),
+                        ),
+                    ) { if (heldLong()) onLongClick() else onCopyCode(code.code) },
+                    code.range.first,
+                    code.range.last + 1,
+                )
+            }
+            if (withLinks) {
+                links.forEach { link ->
+                    addLink(
+                        LinkAnnotation.Clickable(
+                            tag = "link",
+                            styles = TextLinkStyles(SpanStyle(color = linkColour, textDecoration = TextDecoration.Underline)),
+                        ) { if (heldLong()) onLongClick() else onOpenLink(link) },
+                        link.range.first,
+                        link.range.last + 1,
+                    )
+                }
+            }
         }
     }
     val copyCodeLabel = code?.let { stringResource(R.string.copy_code, it.code) }
+    val linkLabels = links.map { link ->
+        val text = message.body.substring(link.range)
+        stringResource(
+            when (link.kind) {
+                LinkKind.Web -> R.string.link_action_open
+                LinkKind.Email -> R.string.link_action_email
+                LinkKind.Phone -> R.string.link_action_call
+            },
+            if (link.kind == LinkKind.Web) hostOf(link.target) else text,
+        )
+    }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = align) {
         if (reactionBar) ReactionBar(mine, alignEnd = outgoing, onReact)
         Column(
@@ -642,8 +737,13 @@ private fun Bubble(
                     contentDescription = description
                     selected = isSelected
                     // The text's own link is hidden by clearing, so TalkBack gets it as an action.
-                    if (code != null && onCopyCode != null && copyCodeLabel != null) {
-                        customActions = listOf(CustomAccessibilityAction(copyCodeLabel) { onCopyCode(code.code); true })
+                    customActions = buildList {
+                        if (code != null && onCopyCode != null && copyCodeLabel != null) {
+                            add(CustomAccessibilityAction(copyCodeLabel) { onCopyCode(code.code); true })
+                        }
+                        if (onOpenLink != null) {
+                            links.forEachIndexed { i, link -> add(CustomAccessibilityAction(linkLabels[i]) { onOpenLink(link); true }) }
+                        }
                     }
                 }
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -676,6 +776,14 @@ private fun Bubble(
                 if (hidden || (waiting == null && (message.body.isNotEmpty() || message.attachments.isEmpty()))) Text(
                     shown,
                     Modifier
+                        // Watches each press without taking it, before the links see it.
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                press[0] = down.uptimeMillis
+                                press[1] = waitForUpOrCancellation(PointerEventPass.Initial)?.uptimeMillis ?: down.uptimeMillis
+                            }
+                        }
                         // In high contrast a received bubble is outlined: its fill is close to the page.
                         .then(if (highContrast && !outgoing) Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape) else Modifier)
                         .clip(shape)

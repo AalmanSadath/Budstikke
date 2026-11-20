@@ -112,6 +112,7 @@ import dev.aalman.budstikke.sms.activeSims
 import dev.aalman.budstikke.sms.preferredSim
 import dev.aalman.budstikke.ui.ConversationListScreen
 import dev.aalman.budstikke.ui.ConversationScreen
+import dev.aalman.budstikke.ui.LinkKind
 import dev.aalman.budstikke.ui.RoleScreen
 import dev.aalman.budstikke.ui.SearchScreen
 import dev.aalman.budstikke.ui.SettingsScreen
@@ -588,6 +589,25 @@ private fun ConversationRoute(
                 }
             }
         },
+        onOpenLink = { link ->
+            val uri = link.target.toUri()
+            val intent = when (link.kind) {
+                LinkKind.Web -> Intent(Intent.ACTION_VIEW, uri)
+                LinkKind.Email -> Intent(Intent.ACTION_SENDTO, uri)
+                LinkKind.Phone -> Intent(Intent.ACTION_DIAL, uri)
+            }
+            if (!openExternal(context, intent)) Toast.makeText(context, R.string.link_no_app, Toast.LENGTH_SHORT).show()
+        },
+        onCopyLink = { address ->
+            context.getSystemService(ClipboardManager::class.java)
+                .setPrimaryClip(ClipData.newPlainText(resources.getString(R.string.link_copy), address))
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                scope.launch {
+                    undo.snackbar.currentSnackbarData?.dismiss()
+                    undo.snackbar.showSnackbar(resources.getString(R.string.copied))
+                }
+            }
+        },
         marks = markState,
         onReact = { message, emoji ->
             // The same emoji again takes it off. A full phone number is told by SMS, held
@@ -980,11 +1000,12 @@ private fun TrashRoute(undo: UndoQueue, onBack: () -> Unit) {
 }
 
 /** Starts another app's screen, doing nothing when no app on the phone handles it. */
-private fun openExternal(context: Context, intent: Intent) {
-    try {
-        context.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
-    }
+/** Starts another app's screen; false when no app handles [intent]. */
+private fun openExternal(context: Context, intent: Intent): Boolean = try {
+    context.startActivity(intent)
+    true
+} catch (_: ActivityNotFoundException) {
+    false
 }
 
 /**
