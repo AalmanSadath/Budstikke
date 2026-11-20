@@ -12,15 +12,15 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 
-/** The newest message of one SMS thread, as the conversation list shows it. */
+/** The newest message of one thread, as the conversation list shows it. */
 data class Conversation(
     val threadId: Long,
-    val address: String,
+    /** Who it is with besides this phone: one person, or the members of a group. */
+    val members: List<Member>,
     val snippet: String,
     val dateMillis: Long,
     val lastFromMe: Boolean,
     val unreadCount: Int,
-    val contact: Contact? = null,
     val flags: Flags = Flags(),
     val blocked: Boolean = false,
     /** Text typed in the conversation and not sent, if any. */
@@ -39,13 +39,20 @@ data class Conversation(
             else -> Folder.Main
         }
 
-    /** The contact's name, or the number or sender name when there is no saved contact. */
-    val title: String get() = contact?.name ?: address
+    val isGroup: Boolean get() = members.size > 1
+
+    val addresses: List<String> get() = members.map { it.address }
+
+    /** The contact of the one person it is with; a group has none of its own. */
+    val contact: Contact? get() = members.singleOrNull()?.contact
+
+    /** The contact's name, the number or sender name, or a group's first names. */
+    val title: String get() = membersTitle(members)
 }
 
 /** A blocked address, and its conversation when there is one. */
 data class BlockedEntry(val address: String, val conversation: Conversation?, val contact: Contact?) {
-    val title: String get() = contact?.name ?: conversation?.address ?: address
+    val title: String get() = contact?.name ?: conversation?.title ?: address
 }
 
 /** Which conversations a list shows. Blocked ones show only in [Blocked], wherever they were. */
@@ -85,7 +92,7 @@ class ConversationRepository(context: Context) {
     fun blocked(): Flow<List<BlockedEntry>> = conversations(Folder.Blocked)
         .map { conversations ->
             blocks.all().flatMap { address ->
-                val matching = conversations.filter { sameSender(it.address, address) }
+                val matching = conversations.filter { c -> !c.isGroup && c.addresses.any { sameSender(it, address) } }
                 if (matching.isEmpty()) {
                     listOf(BlockedEntry(address, null, contacts.lookup(address)))
                 } else {
@@ -106,7 +113,9 @@ class ConversationRepository(context: Context) {
         if (q.isEmpty()) return emptyList()
         val all = load() ?: return emptyList()
         val messages = matchingMessages(q, if (includeLocked) null else locks.state())
-        val byName = all.filter { matchesConversation(it.title, it.address, q) }
+        val byName = all.filter { c ->
+            matchesConversation(c.title, "", q) || c.members.any { matchesConversation(it.name, it.address, q) }
+        }
         val named = byName.mapTo(HashSet()) { it.threadId }
         val byText = all
             .filter { it.threadId !in named && it.threadId in messages }
@@ -222,10 +231,11 @@ class ConversationRepository(context: Context) {
             if (messageLocked) withLocked += threadId
             if (r.unread) unread[threadId] = (unread[threadId] ?: 0) + 1
             if (threadId in latest) continue
+            // An MMS row has no address of its own; the thread's record says who it is with.
+            val addresses = r.address?.let(::listOf) ?: recipients[threadId].orEmpty().ifEmpty { listOf("") }
             val row = Conversation(
                 threadId = threadId,
-                // An MMS row has no address of its own; the thread's record says who it is with.
-                address = r.address ?: recipients[threadId]?.firstOrNull().orEmpty(),
+                members = addresses.map { Member(it) },
                 snippet = r.snippet,
                 dateMillis = r.dateMillis,
                 lastFromMe = !r.inbox,
@@ -251,9 +261,10 @@ class ConversationRepository(context: Context) {
         return latest.values.sortedByDescending { it.dateMillis }.map {
             it.copy(
                 unreadCount = unread[it.threadId] ?: 0,
-                contact = contacts.lookup(it.address),
+                members = it.members.map { m -> m.copy(contact = contacts.lookup(m.address)) },
                 flags = allFlags[it.threadId] ?: Flags(),
-                blocked = blocks.isBlocked(it.address),
+                // A group is never blocked as a whole; its blocked members' messages are dropped.
+                blocked = !it.isGroup && blocks.isBlocked(it.members.single().address),
                 draft = allDrafts[it.threadId],
                 snippetLocked = it.snippetLocked || it.threadId in lockState.threads,
                 hasLocked = it.threadId in lockState.threads || it.threadId in withLocked,

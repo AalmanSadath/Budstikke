@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.update
 data class PendingMessage(
     val id: Long,
     val threadId: Long,
+    /** Who it goes to, as [AddressList] keeps them: one number, or a group's. */
     val address: String,
     val body: String,
     val subscriptionId: Int,
@@ -26,7 +27,9 @@ data class PendingMessage(
     val delayed: Boolean,
     /** Pictures going with it, as an MMS; their files are named by [id]. */
     val attachments: Int = 0,
-)
+) {
+    val addresses: List<String> get() = AddressList.split(address)
+}
 
 /**
  * Messages that go out later: scheduled ones and ones held back by the send delay. Each is
@@ -47,7 +50,7 @@ class Outgoing private constructor(context: Context) {
 
     fun add(
         threadId: Long,
-        address: String,
+        addresses: List<String>,
         body: String,
         subscriptionId: Int,
         sendAtMillis: Long,
@@ -58,7 +61,7 @@ class Outgoing private constructor(context: Context) {
             TABLE, null,
             ContentValues().apply {
                 put(THREAD_ID, threadId)
-                put(ADDRESS, address)
+                put(ADDRESS, AddressList.join(addresses))
                 put(BODY, body)
                 put(SUB_ID, subscriptionId)
                 put(SEND_AT, sendAtMillis)

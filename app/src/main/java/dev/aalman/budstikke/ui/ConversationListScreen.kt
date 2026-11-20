@@ -101,9 +101,14 @@ fun ConversationListScreen(
                     BarAction(R.drawable.ic_close, R.string.clear_selection) { selected = emptySet() }
                 },
                 items = listOfNotNull(
-                    BarItem(R.drawable.ic_block, R.string.block_number) {
-                        onBlock(chosen)
-                        selected = emptySet()
+                    // A group is never blocked as a whole; blocking is offered for one person.
+                    if (chosen.any { !it.isGroup }) {
+                        BarItem(R.drawable.ic_block, R.string.block_number) {
+                            onBlock(chosen)
+                            selected = emptySet()
+                        }
+                    } else {
+                        null
                     },
                     BarItem(
                         if (archive) R.drawable.ic_unarchive else R.drawable.ic_archive,
@@ -260,7 +265,7 @@ internal fun ConversationRow(
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(conversation.address, conversation.contact)
+        MembersAvatar(conversation.members)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

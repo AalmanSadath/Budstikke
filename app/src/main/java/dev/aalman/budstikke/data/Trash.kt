@@ -23,15 +23,15 @@ import java.util.concurrent.TimeUnit
 data class TrashItem(
     val id: Long,
     val wholeConversation: Boolean,
-    val address: String,
+    /** Who the conversation was with: one person, or a group. */
+    val members: List<Member>,
     val deletedAtMillis: Long,
     val messageCount: Int,
     val lastBody: String,
-    val contact: Contact? = null,
     /** Holds a locked conversation or message: its text stays hidden until unlocked. */
     val locked: Boolean = false,
 ) {
-    val title: String get() = contact?.name ?: address
+    val title: String get() = membersTitle(members)
     val expiresAtMillis: Long get() = deletedAtMillis + KEEP_MILLIS
 }
 
@@ -63,7 +63,10 @@ class Trash private constructor(context: Context) {
         .map { load() }
         .flowOn(Dispatchers.IO)
 
-    /** Moves whole conversations to the trash, one item each. Returns the new items' ids. */
+    /**
+     * Moves whole conversations to the trash, one item each, each given with who it is with
+     * as [AddressList] joins them. Returns the new items' ids.
+     */
     fun deleteConversations(threads: Map<Long, String>): List<Long> {
         val before = flags.all()
         val lockState = locks.state()
@@ -84,7 +87,10 @@ class Trash private constructor(context: Context) {
         return ids
     }
 
-    /** Moves the given messages of one conversation, by [MessageKey], to the trash as one item. */
+    /**
+     * Moves the given messages of one conversation, by [MessageKey], to the trash as one
+     * item. [address] is who the conversation is with, as [AddressList] joins them.
+     */
     fun deleteMessages(address: String, messageIds: Collection<Long>): Long? {
         if (messageIds.isEmpty()) return null
         val (mms, sms) = messageIds.partition(MessageKey::isMms)
@@ -340,16 +346,15 @@ class Trash private constructor(context: Context) {
     ).use { c ->
         buildList {
             while (c.moveToNext()) {
-                val address = c.getString(2)
+                val addresses = AddressList.split(c.getString(2).orEmpty()).ifEmpty { listOf("") }
                 add(
                     TrashItem(
                         id = c.getLong(0),
                         wholeConversation = c.getInt(1) != 0,
-                        address = address,
+                        members = addresses.map { Member(it, contacts.lookup(it)) },
                         deletedAtMillis = c.getLong(3),
                         messageCount = c.getInt(4),
                         lastBody = c.getString(5).orEmpty(),
-                        contact = contacts.lookup(address),
                         locked = c.getInt(6) != 0,
                     ),
                 )

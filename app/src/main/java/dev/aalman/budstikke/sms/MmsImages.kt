@@ -37,6 +37,9 @@ data class ShrinkStep(val longestSide: Int, val quality: Int)
  */
 object MmsImages {
 
+    /** How many pictures one message carries at most. */
+    const val MAX_PHOTOS = 5
+
     /** Room left in a message for its headers, text and layout. */
     const val OVERHEAD_BYTES = 8 * 1024
 

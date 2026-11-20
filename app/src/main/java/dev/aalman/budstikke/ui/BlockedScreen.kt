@@ -106,7 +106,7 @@ private fun BlockedRow(entry: BlockedEntry, onOpen: (Conversation) -> Unit, onUn
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(conversation?.address ?: entry.address, entry.contact)
+            Avatar(conversation?.addresses?.firstOrNull() ?: entry.address, entry.contact)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

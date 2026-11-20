@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SubscriptionManager
+import dev.aalman.budstikke.data.AddressList
 import dev.aalman.budstikke.data.BlockList
 import dev.aalman.budstikke.data.ConversationFlags
 import dev.aalman.budstikke.data.Drafts
@@ -143,7 +144,7 @@ class Backup(context: Context) {
         val drafts = Drafts.get(context)
         val existingFlags = flagStore.all()
         for (c in content.conversations) {
-            val threadId = runCatching { Telephony.Threads.getOrCreateThreadId(context, c.address) }.getOrNull() ?: continue
+            val threadId = runCatching { Telephony.Threads.getOrCreateThreadId(context, AddressList.split(c.address).toSet()) }.getOrNull() ?: continue
             // What is set on this phone already wins over the backup.
             if (existingFlags[threadId] == null && (c.pinnedAtMillis != null || c.archived)) {
                 flagStore.restore(mapOf(threadId to Flags(c.pinnedAtMillis, c.archived)))
@@ -167,10 +168,12 @@ class Backup(context: Context) {
                 continue
             }
             if (Triple(s.address, s.body, s.sendAtMillis) in waiting) continue
-            val threadId = runCatching { Telephony.Threads.getOrCreateThreadId(context, s.address) }.getOrNull() ?: continue
+            // A group's addresses travel joined, as the app keeps them.
+            val addresses = AddressList.split(s.address)
+            val threadId = runCatching { Telephony.Threads.getOrCreateThreadId(context, addresses.toSet()) }.getOrNull() ?: continue
             // Another phone's SIMs have other ids; this one's default SIM sends it then.
             val sub = if (s.subscriptionId in sims) s.subscriptionId else SubscriptionManager.INVALID_SUBSCRIPTION_ID
-            outgoing.add(threadId, s.address, s.body, sub, s.sendAtMillis, delayed = false)
+            outgoing.add(threadId, addresses, s.body, sub, s.sendAtMillis, delayed = false)
         }
         return RestoreResult(inserted.added, inserted.alreadyHere, past)
     }

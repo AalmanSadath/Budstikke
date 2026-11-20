@@ -34,18 +34,18 @@ object OutgoingQueue {
     fun sendOrHold(
         context: Context,
         threadId: Long,
-        address: String,
+        addresses: List<String>,
         body: String,
         subscriptionId: Int,
         images: List<ByteArray> = emptyList(),
     ) {
         val delaySeconds = SettingsRepository.get(context).settings.value.sendDelaySeconds
         if (delaySeconds <= 0) {
-            deliver(context, address, body, subscriptionId, images)
+            deliver(context, addresses, body, subscriptionId, images)
             return
         }
         val sendAt = System.currentTimeMillis() + delaySeconds * 1000L
-        val id = Outgoing.get(context).add(threadId, address, body, subscriptionId, sendAt, delayed = true, images = images)
+        val id = Outgoing.get(context).add(threadId, addresses, body, subscriptionId, sendAt, delayed = true, images = images)
         sendWhenDue(context, id, sendAt)
     }
 
@@ -53,16 +53,20 @@ object OutgoingQueue {
     fun sendNow(context: Context, id: Long) {
         val outgoing = Outgoing.get(context)
         val message = outgoing.claim(id) ?: return
-        deliver(context, message.address, message.body, message.subscriptionId, outgoing.images(message))
+        deliver(context, message.addresses, message.body, message.subscriptionId, outgoing.images(message))
         outgoing.dropFiles(message.id)
     }
 
-    /** Text alone goes as SMS; with pictures, as one MMS. */
-    private fun deliver(context: Context, address: String, body: String, subscriptionId: Int, images: List<ByteArray>) {
-        if (images.isEmpty()) {
-            SmsSender(context).send(address, body, subscriptionId)
-        } else {
-            MmsSender.send(context, listOf(address), body, images, subscriptionId)
+    /**
+     * Text to one person goes as SMS. With pictures, or to a group, it goes as one MMS, so
+     * everyone sees the same conversation with everyone in it.
+     */
+    fun deliver(context: Context, addresses: List<String>, body: String, subscriptionId: Int, images: List<ByteArray>) {
+        val single = addresses.singleOrNull()
+        if (single != null && images.isEmpty()) {
+            SmsSender(context).send(single, body, subscriptionId)
+        } else if (addresses.isNotEmpty()) {
+            MmsSender.send(context, addresses, body, images, subscriptionId)
         }
     }
 
@@ -87,7 +91,7 @@ object OutgoingQueue {
         for (due in outgoing.due()) {
             val message = outgoing.claim(due.id) ?: continue
             try {
-                deliver(context, message.address, message.body, message.subscriptionId, outgoing.images(message))
+                deliver(context, message.addresses, message.body, message.subscriptionId, outgoing.images(message))
                 outgoing.dropFiles(message.id)
             } catch (e: Exception) {
                 Log.e(TAG, "Could not send a scheduled message", e)

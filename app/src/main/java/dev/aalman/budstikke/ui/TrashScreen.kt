@@ -136,7 +136,7 @@ private fun TrashRow(item: TrashItem, onRestore: () -> Unit, onDeleteForever: ()
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(item.address, item.contact)
+            MembersAvatar(item.members)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(

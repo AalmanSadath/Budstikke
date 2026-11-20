@@ -17,7 +17,10 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import dev.aalman.budstikke.MainActivity
 import dev.aalman.budstikke.R
+import dev.aalman.budstikke.data.AddressList
 import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.data.Member
+import dev.aalman.budstikke.data.membersTitle
 import dev.aalman.budstikke.data.Locks
 import dev.aalman.budstikke.data.MessageKey
 import dev.aalman.budstikke.data.MmsReader
@@ -52,23 +55,35 @@ class MessageNotifier(context: Context) {
         }
         ensureChannel()
 
-        val address = unread.last().address
+        // A group's notification names each message's sender; one person's, just them.
+        val reader = MmsReader(context.contentResolver)
+        val recipients = reader.recipientsOf(threadId)
+        val group = recipients.size > 1
+        val addresses = if (group) recipients else listOf(unread.last().address)
         val contacts = ContactRepository.get(context)
-        val contact = contacts.lookup(address)
-        val sender = Person.Builder()
-            .setName(contact?.name ?: address)
-            .setKey(address)
-            .apply { contact?.photoUri?.let(contacts::photo)?.let { setIcon(IconCompat.createWithBitmap(it)) } }
-            .build()
+        val people = HashMap<String, Person>()
+        fun personFor(address: String): Person = people.getOrPut(address) {
+            val contact = contacts.lookup(address)
+            Person.Builder()
+                .setName(contact?.name ?: address)
+                .setKey(address)
+                .apply { contact?.photoUri?.let(contacts::photo)?.let { setIcon(IconCompat.createWithBitmap(it)) } }
+                .build()
+        }
         val me = Person.Builder().setName(context.getString(R.string.notification_you)).build()
         val style = NotificationCompat.MessagingStyle(me)
+        if (group) {
+            style.isGroupConversation = true
+            style.conversationTitle = membersTitle(addresses.map { Member(it, contacts.lookup(it)) })
+        }
         // A locked conversation's or message's text stays off the lock screen and the shade.
         val locks = Locks.get(context).state()
         val lockedText = context.getString(R.string.locked_message)
         unread.forEach {
             val body = if (locks.isLocked(threadId, it.id)) lockedText else it.body
-            style.addMessage(body, it.dateMillis, sender)
+            style.addMessage(body, it.dateMillis, personFor(it.address.ifEmpty { addresses.first() }))
         }
+        val address = AddressList.join(addresses)
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -205,7 +220,8 @@ class MessageNotifier(context: Context) {
             }
         }
         // MMS have no address of their own row; who sent each is in its address table.
-        val mms = MmsReader(context.contentResolver).summaries(
+        val reader = MmsReader(context.contentResolver)
+        val mms = reader.summaries(
             "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.READ} = 0 AND ${Telephony.Mms.MESSAGE_BOX} = ${Telephony.Mms.MESSAGE_BOX_INBOX}",
             arrayOf(threadId.toString()),
         ).take(MAX_LINES).map { m ->
@@ -214,7 +230,7 @@ class MessageNotifier(context: Context) {
                 m.text.isNotEmpty() -> m.text
                 else -> context.getString(attachmentLabel(m.attachment))
             }
-            Unread(m.key, MmsReader(context.contentResolver).sender(MessageKey.mmsRowId(m.key)) ?: rows.firstOrNull()?.address.orEmpty(), body, m.dateMillis)
+            Unread(m.key, reader.sender(MessageKey.mmsRowId(m.key)) ?: rows.firstOrNull()?.address.orEmpty(), body, m.dateMillis)
         }
         return (rows + mms).sortedBy { it.dateMillis }.takeLast(MAX_LINES)
     }

@@ -9,7 +9,10 @@ import java.util.concurrent.TimeUnit
 data class BubblePlace(
     /** A time label goes above it: it starts the conversation or follows a long pause. */
     val timeLabel: Boolean,
-    /** It follows a message from the same side, so the two are drawn as one group. */
+    /**
+     * It follows a message from the same side, and in a group from the same person, so the
+     * two are drawn as one run.
+     */
     val joinedAbove: Boolean,
     /** The next message joins it, so its time and state are left to the last of the group. */
     val joinedBelow: Boolean,
@@ -21,7 +24,9 @@ val GROUP_PAUSE_MILLIS: Long = TimeUnit.HOURS.toMillis(1)
 /** The place of each of [messages], given oldest first, in the same order. */
 fun bubblePlaces(messages: List<Message>): List<BubblePlace> {
     val labels = messages.mapIndexed { i, m -> i == 0 || m.dateMillis - messages[i - 1].dateMillis >= GROUP_PAUSE_MILLIS }
-    val joined = messages.mapIndexed { i, m -> i > 0 && !labels[i] && m.isOutgoing == messages[i - 1].isOutgoing }
+    val joined = messages.mapIndexed { i, m ->
+        i > 0 && !labels[i] && m.isOutgoing == messages[i - 1].isOutgoing && m.sender == messages[i - 1].sender
+    }
     return messages.indices.map { i -> BubblePlace(labels[i], joined[i], joined.getOrElse(i + 1) { false }) }
 }
 

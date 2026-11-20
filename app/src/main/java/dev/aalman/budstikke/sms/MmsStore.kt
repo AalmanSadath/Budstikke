@@ -7,6 +7,7 @@ import android.provider.Telephony
 import android.provider.Telephony.Mms
 import android.util.Log
 import androidx.core.net.toUri
+import dev.aalman.budstikke.data.sameSender
 import dev.aalman.budstikke.mms.pdu.CharacterSets
 import dev.aalman.budstikke.mms.pdu.EncodedStringValue
 import dev.aalman.budstikke.mms.pdu.NotificationInd
@@ -54,6 +55,27 @@ class MmsRecord(
     /** The people in the conversation besides this phone: who sent it, or who it went to. */
     val others: List<String>
         get() = if (box == Mms.MESSAGE_BOX_INBOX) listOfNotNull(from) else to + cc
+
+    /**
+     * Who the conversation is with, given this phone's [own] numbers. A received message
+     * sent to several people is a group: its sender and everyone else it went to. This
+     * phone is left out by its number, or, when the SIM does not know its number or knows
+     * an old one, by being the only one the message went to.
+     */
+    fun conversationWith(own: List<String>): List<String> {
+        if (box != Mms.MESSAGE_BOX_INBOX) return distinctPeople(to + cc)
+        val recipients = to + cc
+        val others = recipients.filterNot { r -> own.any { sameSender(it, r) } }
+        val rest = if (others.size == recipients.size && recipients.size <= 1) emptyList() else others
+        return distinctPeople(listOfNotNull(from) + rest)
+    }
+}
+
+/** [addresses] with blanks dropped, each person once however their number is written. */
+internal fun distinctPeople(addresses: List<String>): List<String> {
+    val out = ArrayList<String>()
+    addresses.map { it.trim() }.filter { it.isNotEmpty() }.forEach { a -> if (out.none { sameSender(it, a) }) out += a }
+    return out
 }
 
 /**
@@ -66,11 +88,11 @@ class MmsStore(context: Context) {
     private val resolver = this.context.contentResolver
 
     /**
-     * Writes [record] into the store, filed into the thread with its [MmsRecord.others],
+     * Writes [record] into the store, filed into the thread of [MmsRecord.conversationWith],
      * and returns the new row's id. A failed part write leaves no half-written message.
      */
     fun insert(record: MmsRecord): Long? {
-        val others = record.others.filter { it.isNotBlank() }.distinct()
+        val others = record.conversationWith(ownNumbers(context))
         if (others.isEmpty()) return null
         val threadId = runCatching { Telephony.Threads.getOrCreateThreadId(context, others.toSet()) }.getOrNull()
             ?: return null

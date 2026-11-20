@@ -70,13 +70,16 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.ui.theme.touchTarget
 import dev.aalman.budstikke.ui.theme.LocalHighContrast
-import dev.aalman.budstikke.data.Contact
+import dev.aalman.budstikke.data.Member
+import dev.aalman.budstikke.data.memberFor
+import dev.aalman.budstikke.data.membersTitle
 import dev.aalman.budstikke.data.Message
 import dev.aalman.budstikke.data.Attachment
 import dev.aalman.budstikke.data.attachmentLabel
@@ -113,8 +116,8 @@ import androidx.compose.ui.window.PopupProperties
 /** One conversation: its messages, newest at the bottom, and the field to reply. */
 @Composable
 fun ConversationScreen(
-    address: String,
-    contact: Contact?,
+    /** Who it is with: one person, or the members of a group. */
+    members: List<Member>,
     messages: List<Message>,
     sims: List<Sim>,
     composeText: String,
@@ -157,6 +160,7 @@ fun ConversationScreen(
     onAttach: (() -> Unit)? = null,
     onRemoveAttachment: (String) -> Unit = {},
 ) {
+    val group = members.size > 1
     // The picture opened from a bubble, over the whole screen.
     var viewing by remember { mutableStateOf<Attachment?>(null) }
     viewing?.let { PhotoViewer(it) { viewing = null } }
@@ -167,7 +171,7 @@ fun ConversationScreen(
     val places = remember(shown) { bubblePlaces(shown).let { list -> shown.indices.associate { shown[it].id to list[it] } } }
     val reducedMotion = rememberReducedMotion()
     // Long-pressing a bubble starts selecting messages; taps then add or remove them.
-    var selected by rememberSaveable(address, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
+    var selected by rememberSaveable(threadId, stateSaver = MessageSelectionSaver) { mutableStateOf(emptySet<Long>()) }
     LaunchedEffect(shown) {
         val present = shown.mapTo(HashSet()) { it.id }
         if (!present.containsAll(selected)) selected = selected intersect present
@@ -225,15 +229,15 @@ fun ConversationScreen(
             )
         } else {
             TopBar(
-                contact?.name ?: address,
+                membersTitle(members),
                 onBack = onBack,
-                leading = { Avatar(address, contact, size = 32.dp) },
+                leading = { MembersAvatar(members, size = 32.dp) },
                 onTitleClick = onShowDetails,
                 titleTrailing = simBadge?.let { slot -> { SimBadge(slot, 18.dp, Modifier.padding(end = 8.dp)) } },
                 titleTrailingWidth = if (simBadge != null) 18.dp * 1.5f + 8.dp else 0.dp,
             ) {
                 ConversationMenu(
-                    flags, blocked, threadId in locks.threads, onShowDetails, onPinChange, onArchiveChange,
+                    flags, blocked, !group, threadId in locks.threads, onShowDetails, onPinChange, onArchiveChange,
                     onDeleteConversation, onBlockChange, onLockConversation,
                 )
             }
@@ -311,7 +315,11 @@ fun ConversationScreen(
                 Column(Modifier.motion(this, reducedMotion).padding(top = if (place.joinedAbove) JOINED_SPACING else GROUP_SPACING)) {
                     if (place.timeLabel) TimeLabel(message.dateMillis)
                     val toggle = { selected = if (message.id in selected) selected - message.id else selected + message.id }
-                    Bubble(
+                    // In a group, who sent a received message: named over the first of their
+                    // run, with their avatar beside the last.
+                    val from = message.sender?.takeIf { group && !message.isOutgoing }
+                        ?.let { members.memberFor(it) ?: Member(it) }
+                    SenderRow(from, place) { Bubble(
                         message,
                         simLabel = sims.labelFor(message),
                         isSelected = message.id in selected,
@@ -341,10 +349,10 @@ fun ConversationScreen(
                         },
                         onLongClick = toggle,
                         place = place,
-                        sender = contact?.name ?: address,
+                        sender = from?.name ?: membersTitle(members),
                         onDownload = { if (!selecting) onDownload(message) },
                         onOpenImage = { if (selecting) toggle() else viewing = it },
-                    )
+                    ) }
                 }
             }
         }
@@ -369,6 +377,41 @@ fun ConversationScreen(
         )
     }
 }
+
+/**
+ * A received group message with who sent it: their name over the first bubble of their run,
+ * and their avatar beside the last, with room kept for it beside the others. Anything else
+ * is the bubble alone.
+ */
+@Composable
+private fun SenderRow(from: Member?, place: BubblePlace, bubble: @Composable () -> Unit) {
+    if (from == null) {
+        bubble()
+        return
+    }
+    Row(verticalAlignment = Alignment.Bottom) {
+        // Lifted clear of the time line under the last bubble.
+        Box(Modifier.padding(bottom = 30.dp).size(SENDER_AVATAR).clearAndSetSemantics {}) {
+            if (!place.joinedBelow) Avatar(from.address, from.contact, size = SENDER_AVATAR)
+        }
+        Spacer(Modifier.width(4.dp))
+        Column(Modifier.weight(1f)) {
+            if (!place.joinedAbove) {
+                Text(
+                    from.name,
+                    Modifier.padding(start = 12.dp, bottom = 2.dp).clearAndSetSemantics {},
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            bubble()
+        }
+    }
+}
+
+private val SENDER_AVATAR = 28.dp
 
 /** What can be done to a message that has not gone out yet. */
 enum class PendingAction { SendNow, ChangeTime, Edit, Cancel }
@@ -816,11 +859,15 @@ private fun TimeLabel(millis: Long) {
     )
 }
 
-/** Pin, archive, block and delete for the open conversation. Pinning is offered only outside the archive. */
+/**
+ * Pin, archive, block and delete for the open conversation. Pinning is offered only outside
+ * the archive, and blocking only for one person: a group is never blocked as a whole.
+ */
 @Composable
 private fun ConversationMenu(
     flags: Flags,
     blocked: Boolean,
+    canBlock: Boolean,
     threadLocked: Boolean,
     onShowDetails: () -> Unit,
     onPinChange: (Boolean) -> Unit,
@@ -871,7 +918,7 @@ private fun ConversationMenu(
                     onLockChange(!threadLocked)
                 },
             )
-            DropdownMenuItem(
+            if (canBlock) DropdownMenuItem(
                 text = { Text(stringResource(if (blocked) R.string.unblock_number else R.string.block_number)) },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_block), null) },
                 onClick = {

@@ -70,8 +70,11 @@ internal data class MmsSummary(
 /** Reads MMS from the system store in the shapes the app's screens use. */
 internal class MmsReader(private val resolver: ContentResolver) {
 
-    /** The thread's MMS as conversation messages, oldest first. */
-    fun threadMessages(threadId: Long, downloads: Map<Long, DownloadState>): List<Message> {
+    /**
+     * The thread's MMS as conversation messages, oldest first. In a [group], each received
+     * message names who sent it.
+     */
+    fun threadMessages(threadId: Long, downloads: Map<Long, DownloadState>, group: Boolean = false): List<Message> {
         val rows = rows("${Mms.THREAD_ID} = ?", arrayOf(threadId.toString()))
         if (rows.isEmpty()) return emptyList()
         val parts = parts(rows.map { it.id })
@@ -85,9 +88,13 @@ internal class MmsReader(private val resolver: ContentResolver) {
                 subscriptionId = r.subscriptionId,
                 attachments = own.filter { it.isAttachment }.map { Attachment(it.uri.toString(), it.contentType, it.name) },
                 waiting = if (r.waiting) WaitingMms(r.id, r.size, downloads[r.id] ?: DownloadState.Waiting) else null,
+                sender = if (group && r.box == Mms.MESSAGE_BOX_INBOX) cachedSender(r.id) else null,
             )
         }
     }
+
+    /** Who sent a message never changes, so each is looked up once per process. */
+    private fun cachedSender(rowId: Long): String? = senders[rowId] ?: sender(rowId)?.also { senders[rowId] = it }
 
     /** Every MMS, newest first, with its text and the kind of its first attachment. */
     fun summaries(selection: String? = null, args: Array<String>? = null): List<MmsSummary> {
@@ -140,6 +147,21 @@ internal class MmsReader(private val resolver: ContentResolver) {
                 }
             }
         } ?: emptyMap()
+    }
+
+    /**
+     * The people of one thread besides this phone, from the store's record of it, or an
+     * empty list when the thread is unknown.
+     */
+    fun recipientsOf(threadId: Long): List<String> {
+        val ids = resolver.query(SIMPLE_THREADS, arrayOf("recipient_ids"), "_id = ?", arrayOf(threadId.toString()), null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0).orEmpty().split(' ').mapNotNull { it.toLongOrNull() } else null }
+            ?: return emptyList()
+        if (ids.isEmpty()) return emptyList()
+        val byId = resolver.query(CANONICAL_ADDRESSES, arrayOf("_id", "address"), "_id IN (${ids.joinToString(",")})", null, null)
+            ?.use { c -> buildMap<Long, String> { while (c.moveToNext()) put(c.getLong(0), c.getString(1).orEmpty()) } }
+            ?: return emptyList()
+        return ids.mapNotNull { byId[it]?.takeIf(String::isNotBlank) }
     }
 
     /** Who sent the MMS with row [rowId], or null for none on record. */
@@ -227,6 +249,7 @@ internal class MmsReader(private val resolver: ContentResolver) {
     }
 
     private companion object {
+        val senders = java.util.concurrent.ConcurrentHashMap<Long, String>()
         val CANONICAL_ADDRESSES: Uri = "content://mms-sms/canonical-addresses".toUri()
         val SIMPLE_THREADS: Uri = "content://mms-sms/conversations?simple=true".toUri()
     }

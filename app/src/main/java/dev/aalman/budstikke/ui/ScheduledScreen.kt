@@ -40,12 +40,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
-import dev.aalman.budstikke.data.Contact
+import dev.aalman.budstikke.data.Member
 import dev.aalman.budstikke.data.PendingMessage
+import dev.aalman.budstikke.data.membersTitle
 
-/** A scheduled message with the contact it goes to, when the number is saved. */
-data class ScheduledEntry(val message: PendingMessage, val contact: Contact?, val locked: Boolean = false) {
-    val title: String get() = contact?.name ?: message.address
+/** A scheduled message with who it goes to: one person or a group, with saved contacts. */
+data class ScheduledEntry(val message: PendingMessage, val members: List<Member>, val locked: Boolean = false) {
+    val title: String get() = membersTitle(members)
 }
 
 /**
@@ -109,7 +110,7 @@ private fun ScheduledRow(
                 .semantics(mergeDescendants = true) { contentDescription = description },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(message.address, entry.contact)
+            MembersAvatar(entry.members)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(

@@ -27,6 +27,8 @@ data class Message(
     val attachments: List<Attachment> = emptyList(),
     /** Set while the MMS waits at the carrier and has not been downloaded. */
     val waiting: WaitingMms? = null,
+    /** Who sent it, for a message received in a group; null anywhere else. */
+    val sender: String? = null,
 ) {
     val isOutgoing: Boolean get() = state != MessageState.Received
     val isMms: Boolean get() = MessageKey.isMms(id)
@@ -39,10 +41,13 @@ class MessageRepository(context: Context) {
     private val downloads = MmsDownloads.get(context)
     private val mms = MmsReader(resolver)
 
-    /** The thread's messages, oldest first, reloaded whenever the store or a download changes. */
-    fun messages(threadId: Long): Flow<List<Message>> = merge(resolver.smsChanges(), downloads.changes())
+    /**
+     * The thread's messages, oldest first, reloaded whenever the store or a download changes.
+     * In a [group], received messages name their sender.
+     */
+    fun messages(threadId: Long, group: Boolean = false): Flow<List<Message>> = merge(resolver.smsChanges(), downloads.changes())
         .conflate()
-        .map { load(threadId) }
+        .map { load(threadId, group) }
         .flowOn(Dispatchers.IO)
 
     /** Marks every unread message in the thread as read and seen. */
@@ -68,7 +73,10 @@ class MessageRepository(context: Context) {
         )
     }
 
-    private fun load(threadId: Long): List<Message> {
+    /** The people of a thread besides this phone, as the store records them. */
+    suspend fun recipients(threadId: Long): List<String> = withContext(Dispatchers.IO) { mms.recipientsOf(threadId) }
+
+    private fun load(threadId: Long, group: Boolean): List<Message> {
         val messages = ArrayList<Message>()
         resolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -101,7 +109,7 @@ class MessageRepository(context: Context) {
             }
         }
         // SMS and MMS are two tables; a conversation is both, in date order.
-        val withMms = messages + mms.threadMessages(threadId, downloads.all())
+        val withMms = messages + mms.threadMessages(threadId, downloads.all(), group)
         return withMms.sortedBy { it.dateMillis }
     }
 }

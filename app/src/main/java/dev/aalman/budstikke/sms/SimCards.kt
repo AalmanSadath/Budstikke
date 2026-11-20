@@ -1,11 +1,13 @@
 package dev.aalman.budstikke.sms
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 
 /**
  * An active SIM that can send SMS. [name] is the name saved for it in Android's SIM settings,
@@ -58,4 +60,23 @@ internal fun smsManagerFor(context: Context, subscriptionId: Int): SmsManager {
         @Suppress("DEPRECATION")
         if (valid) SmsManager.getSmsManagerForSubscriptionId(subscriptionId) else SmsManager.getDefault()
     }
+}
+
+/**
+ * This phone's own numbers, as its SIMs report them. Often empty: many carriers never write
+ * the number onto the SIM. The default SMS app may read them with its SMS permission. Used
+ * only to leave this phone out of a group's members; never stored or sent anywhere.
+ */
+@SuppressLint("HardwareIds")
+@Suppress("DEPRECATION")
+fun ownNumbers(context: Context): List<String> {
+    if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) return emptyList()
+    val telephony = context.getSystemService(TelephonyManager::class.java) ?: return emptyList()
+    val subscriptions = activeSims(context).map { it.subscriptionId }.ifEmpty { listOf(SubscriptionManager.getDefaultSubscriptionId()) }
+    return subscriptions.mapNotNull { id ->
+        runCatching {
+            val forSim = if (id == SubscriptionManager.INVALID_SUBSCRIPTION_ID) telephony else telephony.createForSubscriptionId(id)
+            forSim.line1Number
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }.distinct()
 }

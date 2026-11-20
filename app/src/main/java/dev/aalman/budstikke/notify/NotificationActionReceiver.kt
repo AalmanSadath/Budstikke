@@ -17,7 +17,8 @@ import androidx.core.app.RemoteInput
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.Locks
 import dev.aalman.budstikke.sms.findOneTimeCode
-import dev.aalman.budstikke.sms.SmsSender
+import dev.aalman.budstikke.data.AddressList
+import dev.aalman.budstikke.sms.OutgoingQueue
 import kotlin.concurrent.thread
 
 /** Reply, Mark as read and Copy code from a message notification. */
@@ -37,7 +38,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 when (action) {
                     ACTION_REPLY -> {
                         if (!reply.isNullOrEmpty() && address != null) {
-                            SmsSender(context).send(address, reply, lastSubscription(context, threadId))
+                            // To one person as SMS, to a group as one MMS, as from the app.
+                            OutgoingQueue.deliver(context, AddressList.split(address), reply, lastSubscription(context, threadId), emptyList())
                             markRead(context, threadId)
                         }
                         notifier.replied(threadId)
