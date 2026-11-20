@@ -8,30 +8,46 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 
 /** Where an SMS stands, as the conversation screen shows it. */
 enum class MessageState { Received, Sending, Sent, Delivered, Failed }
 
+/**
+ * One message of a conversation, SMS or MMS. [id] is a [MessageKey]: an MMS's is negative.
+ * An MMS's text is in [body], its pictures and files in [attachments].
+ */
 data class Message(
     val id: Long,
     val body: String,
     val dateMillis: Long,
     val state: MessageState,
     val subscriptionId: Int,
+    val attachments: List<Attachment> = emptyList(),
+    /** Set while the MMS waits at the carrier and has not been downloaded. */
+    val waiting: WaitingMms? = null,
+    /** Who sent it, for a message received in a group; null anywhere else. */
+    val sender: String? = null,
 ) {
     val isOutgoing: Boolean get() = state != MessageState.Received
+    val isMms: Boolean get() = MessageKey.isMms(id)
 }
 
-/** Reads and updates the SMS of one thread in the system message store. */
+/** Reads and updates the messages of one thread in the system message store. */
 class MessageRepository(context: Context) {
 
     private val resolver = context.applicationContext.contentResolver
+    private val downloads = MmsDownloads.get(context)
+    private val mms = MmsReader(resolver)
 
-    /** The thread's messages, oldest first, reloaded whenever the SMS store changes. */
-    fun messages(threadId: Long): Flow<List<Message>> = resolver.smsChanges()
+    /**
+     * The thread's messages, oldest first, reloaded whenever the store or a download changes.
+     * In a [group], received messages name their sender.
+     */
+    fun messages(threadId: Long, group: Boolean = false): Flow<List<Message>> = merge(resolver.smsChanges(), downloads.changes())
         .conflate()
-        .map { load(threadId) }
+        .map { load(threadId, group) }
         .flowOn(Dispatchers.IO)
 
     /** Marks every unread message in the thread as read and seen. */
@@ -46,9 +62,21 @@ class MessageRepository(context: Context) {
             "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
             arrayOf(threadId.toString()),
         )
+        resolver.update(
+            Telephony.Mms.CONTENT_URI,
+            ContentValues().apply {
+                put(Telephony.Mms.READ, 1)
+                put(Telephony.Mms.SEEN, 1)
+            },
+            "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.READ} = 0",
+            arrayOf(threadId.toString()),
+        )
     }
 
-    private fun load(threadId: Long): List<Message> {
+    /** The people of a thread besides this phone, as the store records them. */
+    suspend fun recipients(threadId: Long): List<String> = withContext(Dispatchers.IO) { mms.recipientsOf(threadId) }
+
+    private fun load(threadId: Long, group: Boolean): List<Message> {
         val messages = ArrayList<Message>()
         resolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -80,7 +108,9 @@ class MessageRepository(context: Context) {
                 )
             }
         }
-        return messages
+        // SMS and MMS are two tables; a conversation is both, in date order.
+        val withMms = messages + mms.threadMessages(threadId, downloads.all(), group)
+        return withMms.sortedBy { it.dateMillis }
     }
 }
 

@@ -36,6 +36,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.res.pluralStringResource
+import dev.aalman.budstikke.sms.MmsLimits
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -198,6 +203,32 @@ fun SettingsScreen(sims: List<Sim>, onShowScheduled: () -> Unit, onShowBlocked: 
             )
             Spacer(Modifier.height(12.dp))
             LinkRow(stringResource(R.string.scheduled_title), onClick = onShowScheduled)
+            Spacer(Modifier.height(12.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_mms_auto),
+                hint = stringResource(R.string.settings_mms_auto_summary),
+                checked = settings.autoDownloadMms,
+                onCheckedChange = { on -> repository.update { it.copy(autoDownloadMms = on) } },
+            )
+            if (settings.autoDownloadMms) {
+                SwitchRow(
+                    title = stringResource(R.string.settings_mms_roaming),
+                    hint = stringResource(R.string.settings_mms_roaming_summary),
+                    checked = settings.autoDownloadMmsRoaming,
+                    onCheckedChange = { on -> repository.update { it.copy(autoDownloadMmsRoaming = on) } },
+                )
+            }
+            // Until changed, this follows the carrier of the SIM new messages go out on.
+            val context = LocalContext.current
+            val limits by produceState(MmsLimits.DEFAULT, settings.defaultSubscriptionId) {
+                value = withContext(Dispatchers.IO) { MmsLimits.of(context, settings.defaultSubscriptionId) }
+            }
+            SwitchRow(
+                title = stringResource(R.string.settings_long_text_mms),
+                hint = pluralStringResource(R.plurals.settings_long_text_mms_summary, limits.longTextParts, limits.longTextParts),
+                checked = settings.longTextAsMms ?: (limits.textThreshold > 0),
+                onCheckedChange = { on -> repository.update { it.copy(longTextAsMms = on) } },
+            )
 
             Spacer(Modifier.height(28.dp))
             SectionHeading(stringResource(R.string.settings_blocking))

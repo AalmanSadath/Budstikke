@@ -1,6 +1,16 @@
 package dev.aalman.budstikke
 
 import kotlinx.coroutines.flow.combine
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import android.widget.Toast
+import androidx.core.net.toUri
+import dev.aalman.budstikke.sms.MmsImages
+import dev.aalman.budstikke.sms.MmsSender
+import dev.aalman.budstikke.data.MessageKey
+import dev.aalman.budstikke.data.DownloadState
+import dev.aalman.budstikke.data.AttachmentKind
+import dev.aalman.budstikke.sms.MmsDownloader
 import dev.aalman.budstikke.data.Marks
 import dev.aalman.budstikke.data.MarkState
 import dev.aalman.budstikke.data.StarredMessage
@@ -88,6 +98,9 @@ import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.ContactRepository
 import dev.aalman.budstikke.data.ConversationRepository
 import dev.aalman.budstikke.data.MessageRepository
+import dev.aalman.budstikke.data.AddressList
+import dev.aalman.budstikke.data.Member
+import dev.aalman.budstikke.data.membersTitle
 import dev.aalman.budstikke.data.SearchResult
 import dev.aalman.budstikke.notify.ActiveConversation
 import dev.aalman.budstikke.notify.MessageNotifier
@@ -108,10 +121,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** A conversation open on screen: its thread in the message store and who it is with. */
+/**
+ * A conversation open on screen: its thread in the message store, and who it is with as far
+ * as whoever opened it knows. The store's own record of the thread has the last word.
+ */
 private data class OpenThread(
     val threadId: Long,
-    val address: String,
+    val addresses: List<String>,
     /** A message to scroll to on opening, such as the one a search found. */
     val focusMessageId: Long? = null,
     /** Text to mark in every message, the search that led here. */
@@ -151,7 +167,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         refreshRole()
         openThread = savedInstanceState?.let { state ->
-            state.getString(STATE_ADDRESS)?.let { OpenThread(state.getLong(STATE_THREAD_ID), it) }
+            state.getString(STATE_ADDRESS)?.let { OpenThread(state.getLong(STATE_THREAD_ID), AddressList.split(it)) }
         } ?: threadFrom(intent)
         showSettings = savedInstanceState?.getBoolean(STATE_SETTINGS) ?: false
         showArchive = savedInstanceState?.getBoolean(STATE_ARCHIVE) ?: false
@@ -196,7 +212,7 @@ class MainActivity : ComponentActivity() {
                                 val conversation = result.conversation
                                 openThread = OpenThread(
                                     conversation.threadId,
-                                    conversation.address,
+                                    conversation.addresses,
                                     focusMessageId = result.message?.id,
                                     highlight = searchQuery.trim().takeIf { result.message != null },
                                 )
@@ -207,7 +223,7 @@ class MainActivity : ComponentActivity() {
                     showStarred -> {
                         BackHandler { showStarred = false }
                         StarredRoute(
-                            onOpen = { openThread = OpenThread(it.threadId, it.address, focusMessageId = it.id) },
+                            onOpen = { openThread = OpenThread(it.threadId, listOf(it.address), focusMessageId = it.id) },
                             onBack = { showStarred = false },
                         )
                     }
@@ -216,7 +232,7 @@ class MainActivity : ComponentActivity() {
                         BlockedRoute(
                             conversations,
                             undo,
-                            onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                            onOpen = { openThread = OpenThread(it.threadId, it.addresses) },
                             onBack = { showBlocked = false },
                         )
                     }
@@ -224,7 +240,7 @@ class MainActivity : ComponentActivity() {
                         BackHandler { showScheduled = false }
                         ScheduledRoute(
                             undo,
-                            onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                            onOpen = { openThread = OpenThread(it.threadId, it.addresses) },
                             onBack = { showScheduled = false },
                         )
                     }
@@ -248,7 +264,7 @@ class MainActivity : ComponentActivity() {
                             undo,
                             sims,
                             archive = true,
-                            onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                            onOpen = { openThread = OpenThread(it.threadId, it.addresses) },
                             onBack = { showArchive = false },
                         )
                     }
@@ -257,7 +273,7 @@ class MainActivity : ComponentActivity() {
                         undo,
                         sims,
                         archive = false,
-                        onOpen = { openThread = OpenThread(it.threadId, it.address) },
+                        onOpen = { openThread = OpenThread(it.threadId, it.addresses) },
                         onNewMessage = { startActivity(Intent(this@MainActivity, ComposeActivity::class.java)) },
                         onShowArchive = { showArchive = true },
                         onShowTrash = { showTrash = true },
@@ -304,7 +320,7 @@ class MainActivity : ComponentActivity() {
         outState.putString(STATE_SEARCH_QUERY, searchQuery)
         openThread?.let {
             outState.putLong(STATE_THREAD_ID, it.threadId)
-            outState.putString(STATE_ADDRESS, it.address)
+            outState.putString(STATE_ADDRESS, AddressList.join(it.addresses))
         }
     }
 
@@ -332,7 +348,7 @@ class MainActivity : ComponentActivity() {
     private fun threadFrom(intent: Intent?): OpenThread? {
         val threadId = intent?.getLongExtra(EXTRA_THREAD_ID, -1L) ?: -1L
         val address = intent?.getStringExtra(EXTRA_ADDRESS)
-        return if (threadId >= 0 && address != null) OpenThread(threadId, address) else null
+        return if (threadId >= 0 && address != null) OpenThread(threadId, AddressList.split(address)) else null
     }
 
     companion object {
@@ -349,7 +365,10 @@ class MainActivity : ComponentActivity() {
         private const val STATE_STARRED = "starred"
         private const val STATE_SEARCH_QUERY = "search_query"
 
-        /** Opens one conversation, reusing the activity if it is already running. */
+        /**
+         * Opens one conversation, reusing the activity if it is already running. [address]
+         * is who it is with, a group's as [AddressList] joins them.
+         */
         fun openConversation(context: Context, threadId: Long, address: String): Intent =
             Intent(context, MainActivity::class.java)
                 .putExtra(EXTRA_THREAD_ID, threadId)
@@ -373,9 +392,38 @@ private fun ConversationRoute(
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val flow = remember(thread.threadId) { repository.messages(thread.threadId) }
+    // Who the conversation is with, by the store's record of the thread once it is read.
+    val addresses by produceState(thread.addresses, thread.threadId) {
+        value = repository.recipients(thread.threadId).ifEmpty { thread.addresses }
+    }
+    val group = addresses.size > 1
+    val flow = remember(thread.threadId, group) { repository.messages(thread.threadId, group) }
     val messages by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     var text by rememberSaveable(thread.threadId) { mutableStateOf("") }
+    // Pictures picked to go with the next message, as URIs; with any, it goes as an MMS.
+    var attached by rememberSaveable(thread.threadId) { mutableStateOf(listOf<String>()) }
+    val pickPhotos = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(MmsImages.MAX_PHOTOS),
+    ) { uris -> attached = (attached + uris.map { it.toString() }).distinct().take(MmsImages.MAX_PHOTOS) }
+    /**
+     * Shrinks the attached pictures for sending, then hands them to [then]; tells the user
+     * and keeps them attached when one cannot be read or made small enough.
+     */
+    fun withImages(body: String, subscription: Int, then: suspend (List<ByteArray>) -> Unit) {
+        val picked = attached
+        attached = emptyList()
+        scope.launch {
+            val images = if (picked.isEmpty()) emptyList() else withContext(Dispatchers.IO) {
+                MmsImages.prepare(context, picked.map { it.toUri() }, body, subscription)
+            }
+            if (images == null) {
+                attached = picked
+                Toast.makeText(context, R.string.attach_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            withContext(Dispatchers.IO) { then(images) }
+        }
+    }
     // Unsent text is kept as a draft: filled in when the conversation opens, saved shortly
     // after typing stops, and saved at once when the screen or the app is left.
     val drafts = remember { Drafts.get(context) }
@@ -404,8 +452,11 @@ private fun ConversationRoute(
     val trash = remember { Trash.get(context) }
     val resources = LocalResources.current
     val blockList = remember { BlockList.get(context) }
-    val blocked by produceState(false, thread.address) {
-        blockList.changes().collect { value = withContext(Dispatchers.IO) { blockList.isBlocked(thread.address) } }
+    // A group is never blocked as a whole.
+    val blocked by produceState(false, addresses) {
+        blockList.changes().collect {
+            value = !group && withContext(Dispatchers.IO) { blockList.isBlocked(addresses.first()) }
+        }
     }
     val outgoing = remember { Outgoing.get(context) }
     val pendingFlow = remember(thread.threadId) { outgoing.forThread(thread.threadId) }
@@ -447,12 +498,12 @@ private fun ConversationRoute(
             unlock {}
         }
     }
-    val contact by produceState<Contact?>(null, thread.address) {
-        value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
-        contacts.changes().collect {
-            value = withContext(Dispatchers.IO) { contacts.lookup(thread.address) }
-        }
+    val members by produceState(addresses.map { Member(it) }, addresses) {
+        val look = suspend { withContext(Dispatchers.IO) { addresses.map { Member(it, contacts.lookup(it)) } } }
+        value = look()
+        contacts.changes().collect { value = look() }
     }
+    val contact = members.singleOrNull()?.contact
 
     // While the conversation is on screen, what arrives in it is seen: no notification,
     // and it is marked read. Leaving the screen or the app ends that.
@@ -485,14 +536,14 @@ private fun ConversationRoute(
         // An archived conversation leaves the list it was opened from, so go back to it.
         if (archived) onBack()
     }
-    val onBlockChange: (Boolean) -> Unit = { block ->
+    val onBlockChange: (Boolean) -> Unit = onBlock@{ block ->
+        val address = addresses.singleOrNull() ?: return@onBlock
         if (block) {
-            val title = contact?.name ?: thread.address
-            blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, thread.address, title)))
+            blockConversations(scope, undo, resources, context, listOf(Triple(thread.threadId, address, membersTitle(members))))
             // The conversation moves to Spam & blocked, out of the list it was opened from.
             onBack()
         } else {
-            scope.launch(Dispatchers.IO) { blockList.unblock(thread.address) }
+            scope.launch(Dispatchers.IO) { blockList.unblock(address) }
         }
     }
     // The details screen stands in for the conversation, so back from it returns here.
@@ -500,12 +551,11 @@ private fun ConversationRoute(
     if (showDetails) {
         BackHandler { showDetails = false }
         DetailsScreen(
-            address = thread.address,
-            contact = contact,
+            members = members,
             flags = flags,
             blocked = blocked,
-            onCall = { openExternal(context, Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", thread.address, null))) },
-            onContact = { openContact(context, contact, thread.address) },
+            onCall = { openExternal(context, Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", addresses.first(), null))) },
+            onContact = { member -> openContact(context, member.contact, member.address) },
             onBlockChange = onBlockChange,
             onArchiveChange = onArchiveChange,
             onBack = { showDetails = false },
@@ -514,7 +564,7 @@ private fun ConversationRoute(
     }
 
     ConversationScreen(
-        address = thread.address,
+        members = members,
         onShowDetails = { showDetails = true },
         locks = lockState,
         threadId = thread.threadId,
@@ -546,9 +596,10 @@ private fun ConversationRoute(
             val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
             scope.launch(Dispatchers.IO) {
                 markStore.setReaction(message.id, if (removing) null else emoji)
-                if (canSendReactionTo(thread.address)) {
-                    val body = reactionText(emoji, message.body, removed = removing)
-                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
+                if (addresses.all(::canSendReactionTo)) {
+                    val image = message.attachments.any { it.kind == AttachmentKind.Image }
+                    val body = reactionText(emoji, message.body, removed = removing, image = image)
+                    OutgoingQueue.sendOrHold(context, thread.threadId, addresses, body, subscription)
                 }
             }
         },
@@ -567,7 +618,6 @@ private fun ConversationRoute(
         },
         focusMessageId = thread.focusMessageId,
         highlight = thread.highlight,
-        contact = contact,
         messages = messages,
         sims = sims,
         composeText = text,
@@ -577,17 +627,30 @@ private fun ConversationRoute(
         simBadge = sim?.let { simSlots(sims, settings.showSimBadge)[it.subscriptionId] },
         onSend = {
             val body = text.trim()
-            if (body.isNotEmpty()) {
+            if (body.isNotEmpty() || attached.isNotEmpty()) {
                 text = ""
                 val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                scope.launch(Dispatchers.IO) {
-                    OutgoingQueue.sendOrHold(context, thread.threadId, thread.address, body, subscription)
+                withImages(body, subscription) { images ->
+                    OutgoingQueue.sendOrHold(context, thread.threadId, addresses, body, subscription, images)
                 }
             }
         },
-        onRetry = { message -> scope.launch(Dispatchers.IO) { sender.retry(message.id) } },
+        attachments = attached,
+        onAttach = { pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        onRemoveAttachment = { uri -> attached = attached - uri },
+        onRetry = { message ->
+            scope.launch(Dispatchers.IO) {
+                if (message.isMms) MmsSender.retry(context, MessageKey.mmsRowId(message.id)) else sender.retry(message.id)
+            }
+        },
+        onDownload = { message ->
+            val waiting = message.waiting
+            if (waiting != null && waiting.download != DownloadState.Downloading) {
+                scope.launch(Dispatchers.IO) { MmsDownloader.start(context, waiting.rowId) }
+            }
+        },
         pending = pending,
-        onSchedule = { if (text.isNotBlank()) picker = SchedulePick(null) },
+        onSchedule = { if (text.isNotBlank() || attached.isNotEmpty()) picker = SchedulePick(null) },
         onPendingAction = { message, action ->
             when (action) {
                 PendingAction.ChangeTime -> picker = SchedulePick(message)
@@ -595,6 +658,9 @@ private fun ConversationRoute(
                     val claimed = withContext(Dispatchers.IO) { outgoing.claim(message.id) } ?: return@launch
                     // Back into the field to change; scheduling again is a long press away.
                     text = if (text.isBlank()) claimed.body else "${text.trimEnd()} ${claimed.body}"
+                    // Its pictures come back too, from the files kept for it until the app restarts.
+                    val files = withContext(Dispatchers.IO) { outgoing.imageFiles(claimed) }
+                    attached = (attached + files.map { Uri.fromFile(it).toString() }).distinct().take(MmsImages.MAX_PHOTOS)
                 }
                 else -> pendingAction(scope, context, undo, resources, message, action)
             }
@@ -606,7 +672,7 @@ private fun ConversationRoute(
         onArchiveChange = onArchiveChange,
         onDeleteMessages = { ids ->
             scope.launch {
-                val item = withContext(Dispatchers.IO) { trash.deleteMessages(thread.address, ids) }
+                val item = withContext(Dispatchers.IO) { trash.deleteMessages(AddressList.join(addresses), ids) }
                     ?: return@launch
                 undo.push(resources.getQuantityString(R.plurals.deleted_messages, ids.size, ids.size)) {
                     trash.restore(listOf(item))
@@ -617,7 +683,7 @@ private fun ConversationRoute(
         onBlockChange = onBlockChange,
         onDeleteConversation = {
             val delete = {
-                deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to thread.address), context)
+                deleteConversations(scope, trash, undo, resources, mapOf(thread.threadId to AddressList.join(addresses)), context)
                 onBack()
             }
             // Whatever is locked goes to the trash only once the screen lock is confirmed.
@@ -636,15 +702,15 @@ private fun ConversationRoute(
                     scope.launch(Dispatchers.IO) { outgoing.reschedule(changing.id, millis) }
                 } else {
                     val body = text.trim()
-                    if (body.isEmpty()) return@SchedulePicker
+                    if (body.isEmpty() && attached.isEmpty()) return@SchedulePicker
                     text = ""
                     val subscription = sim?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            outgoing.add(thread.threadId, thread.address, body, subscription, millis, delayed = false)
+                    withImages(body, subscription) { images ->
+                        outgoing.add(thread.threadId, addresses, body, subscription, millis, delayed = false, images = images)
+                        withContext(Dispatchers.Main) {
+                            undo.snackbar.currentSnackbarData?.dismiss()
+                            undo.snackbar.showSnackbar(resources.getString(R.string.scheduled_done, messageTime(context, millis)))
                         }
-                        undo.snackbar.currentSnackbarData?.dismiss()
-                        undo.snackbar.showSnackbar(resources.getString(R.string.scheduled_done, messageTime(context, millis)))
                     }
                 }
             },
@@ -699,11 +765,13 @@ private fun ConversationListRoute(
             }
         },
         onBlock = { chosen ->
-            blockConversations(scope, undo, resources, context, chosen.map { Triple(it.threadId, it.address, it.title) })
+            // A group is never blocked as a whole, so only one-person conversations are.
+            val people = chosen.filterNot { it.isGroup }
+            blockConversations(scope, undo, resources, context, people.map { Triple(it.threadId, it.addresses.single(), it.title) })
         },
         onDelete = { chosen ->
             val delete = {
-                deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to it.address }, context)
+                deleteConversations(scope, trash, undo, resources, chosen.associate { it.threadId to AddressList.join(it.addresses) }, context)
             }
             // Whatever is locked goes to the trash only once the screen lock is confirmed.
             if (chosen.any { it.hasLocked }) {
@@ -856,7 +924,7 @@ private fun ScheduledRoute(undo: UndoQueue, onOpen: (PendingMessage) -> Unit, on
     val flow = remember {
         combine(Outgoing.get(context).all(), locks.changes()) { all, _ ->
             val lockedThreads = locks.state().threads
-            all.filter { !it.delayed }.map { ScheduledEntry(it, contacts.lookup(it.address), it.threadId in lockedThreads) }
+            all.filter { !it.delayed }.map { ScheduledEntry(it, it.addresses.map { a -> Member(a, contacts.lookup(a)) }, it.threadId in lockedThreads) }
         }.flowOn(Dispatchers.IO)
     }
     val entries by flow.collectAsStateWithLifecycle(initialValue = null)

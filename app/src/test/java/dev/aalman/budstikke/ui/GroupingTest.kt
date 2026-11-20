@@ -29,6 +29,14 @@ class GroupingTest {
     }
 
     @Test
+    fun inAGroupARunBreaksWhenTheSenderChanges() {
+        fun from(id: Long, sender: String) = msg(id, id, false).copy(sender = sender)
+        val places = bubblePlaces(listOf(from(1, "+111"), from(2, "+111"), from(3, "+222"), msg(4, 4, true)))
+        assertEquals(listOf(false, true, false, false), places.map { it.joinedAbove })
+        assertEquals(listOf(true, false, false, false), places.map { it.joinedBelow })
+    }
+
+    @Test
     fun handlesNoMessages() {
         assertEquals(emptyList<BubblePlace>(), bubblePlaces(emptyList()))
     }

@@ -31,21 +31,51 @@ object OutgoingQueue {
      * Sends a message typed in the app: at once, or held back for the send delay set in
      * Settings, during which the conversation shows a countdown and Cancel.
      */
-    fun sendOrHold(context: Context, threadId: Long, address: String, body: String, subscriptionId: Int) {
+    fun sendOrHold(
+        context: Context,
+        threadId: Long,
+        addresses: List<String>,
+        body: String,
+        subscriptionId: Int,
+        images: List<ByteArray> = emptyList(),
+    ) {
         val delaySeconds = SettingsRepository.get(context).settings.value.sendDelaySeconds
         if (delaySeconds <= 0) {
-            SmsSender(context).send(address, body, subscriptionId)
+            deliver(context, addresses, body, subscriptionId, images)
             return
         }
         val sendAt = System.currentTimeMillis() + delaySeconds * 1000L
-        val id = Outgoing.get(context).add(threadId, address, body, subscriptionId, sendAt, delayed = true)
+        val id = Outgoing.get(context).add(threadId, addresses, body, subscriptionId, sendAt, delayed = true, images = images)
         sendWhenDue(context, id, sendAt)
     }
 
     /** Sends one message now, if nothing else has sent or cancelled it. */
     fun sendNow(context: Context, id: Long) {
-        val message = Outgoing.get(context).claim(id) ?: return
-        SmsSender(context).send(message.address, message.body, message.subscriptionId)
+        val outgoing = Outgoing.get(context)
+        val message = outgoing.claim(id) ?: return
+        deliver(context, message.addresses, message.body, message.subscriptionId, outgoing.images(message))
+        outgoing.dropFiles(message.id)
+    }
+
+    /**
+     * Text to one person goes as SMS. With pictures, or to a group, it goes as one MMS, so
+     * everyone sees the same conversation with everyone in it. So does a text too long for
+     * a few SMS when that is on, so it arrives whole rather than in parts.
+     */
+    fun deliver(context: Context, addresses: List<String>, body: String, subscriptionId: Int, images: List<ByteArray>) {
+        val single = addresses.singleOrNull()
+        if (single != null && images.isEmpty() && !longTextAsMms(context, body, subscriptionId)) {
+            SmsSender(context).send(single, body, subscriptionId)
+        } else if (addresses.isNotEmpty()) {
+            MmsSender.send(context, addresses, body, images, subscriptionId)
+        }
+    }
+
+    private fun longTextAsMms(context: Context, body: String, subscriptionId: Int): Boolean {
+        val setting = SettingsRepository.get(context).settings.value.longTextAsMms
+        if (setting == false) return false
+        val parts = runCatching { smsManagerFor(context, subscriptionId).divideMessage(body).size }.getOrDefault(1)
+        return MmsLimits.of(context, subscriptionId).sendsAsMms(parts, setting)
     }
 
     private val timers = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -66,11 +96,11 @@ object OutgoingQueue {
     /** Sends everything whose time has come, including what fell due while the phone was off. */
     fun sendDue(context: Context) {
         val outgoing = Outgoing.get(context)
-        val sender = SmsSender(context)
         for (due in outgoing.due()) {
             val message = outgoing.claim(due.id) ?: continue
             try {
-                sender.send(message.address, message.body, message.subscriptionId)
+                deliver(context, message.addresses, message.body, message.subscriptionId, outgoing.images(message))
+                outgoing.dropFiles(message.id)
             } catch (e: Exception) {
                 Log.e(TAG, "Could not send a scheduled message", e)
             }

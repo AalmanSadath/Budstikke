@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.data.Member
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -82,6 +83,33 @@ fun Avatar(address: String, contact: Contact?, modifier: Modifier = Modifier, si
             }
         }
         if (contact?.work == true) WorkBadge(Modifier.align(Alignment.BottomEnd), size)
+    }
+}
+
+/**
+ * The avatar of a conversation with [members]: one person's own, or for a group the first
+ * two members' avatars overlapping, the front one ringed in the page colour.
+ */
+@Composable
+fun MembersAvatar(members: List<Member>, modifier: Modifier = Modifier, size: Dp = 44.dp) {
+    if (members.size <= 1) {
+        val one = members.firstOrNull()
+        Avatar(one?.address.orEmpty(), one?.contact, modifier, size)
+        return
+    }
+    val small = size * 0.66f
+    Box(modifier.size(size)) {
+        Avatar(members[0].address, members[0].contact, Modifier.align(Alignment.TopStart), small)
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .size(small)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(small * 0.06f),
+        ) {
+            Avatar(members[1].address, members[1].contact, size = small * 0.88f)
+        }
     }
 }
 

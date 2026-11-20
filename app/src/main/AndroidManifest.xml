@@ -2,9 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- SMS only. No network access: the INTERNET permission is removed even if a
-         library declares it, so Android blocks every socket the app could open. -->
+    <!-- No network access: the INTERNET permission is removed even if a library declares it,
+         so Android blocks every socket the app could open. MMS go through Android's own MMS
+         service, which uses mobile data itself; the app only hands it files. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- Lists the active SIMs so a message can be sent on either. -->
@@ -99,8 +102,8 @@
             </intent-filter>
         </receiver>
 
-        <!-- The SMS role is only granted to an app that also declares an MMS receiver.
-             MMS is out of scope, so the push is dropped. -->
+        <!-- The carrier's notice that an MMS is waiting, delivered only to the default SMS
+             app. The message itself is then downloaded through Android's MMS service. -->
         <receiver
             android:name=".sms.MmsDeliverReceiver"
             android:exported="true"
@@ -110,6 +113,24 @@
                 <data android:mimeType="application/vnd.wap.mms-message" />
             </intent-filter>
         </receiver>
+
+        <!-- Download and send results from Android's MMS service. Only this app's own
+             PendingIntents reach it. -->
+        <receiver
+            android:name=".sms.MmsResultReceiver"
+            android:exported="false" />
+
+        <!-- Hands MMS files to Android's MMS service, and attachments to the app that opens
+             them, one URI at a time with a temporary grant. Not exported. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- Sent and delivered results for outgoing SMS. Only this app's own
              PendingIntents reach it. -->

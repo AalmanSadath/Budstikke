@@ -45,6 +45,52 @@ class ImportersTest {
     }
 
     @Test
+    fun bringsInSmsImportExportMmsWithTheirFiles() {
+        val group = """{"_id":"5","date":"1700000200","msg_box":"1","m_type":"132","read":"0","sub_id":"1","__sender_address":{"address":"+4741234567","type":"137"},"__recipient_addresses":[{"address":"+4790000000","type":"151"},{"address":"+4791111111","type":"130"}],"__parts":[{"ct":"application/smil","text":"<smil/>"},{"ct":"image/jpeg","name":"cat.jpg","_data":"/data/user_de/0/com.android.providers.telephony/app_parts/PART_1"},{"ct":"text/plain","chset":"106","text":"Se her"}]}"""
+        val report = """{"_id":"6","date":"1700000300","msg_box":"1","m_type":"134","__sender_address":{"address":"+4741234567"},"__parts":[]}"""
+        val scratch = java.nio.file.Files.createTempDirectory("import").toFile()
+        val got = ArrayList<dev.aalman.budstikke.sms.MmsRecord>()
+        try {
+            val parsed = Importers.parse(
+                ImportSource.SmsImportExport,
+                zip("messages.ndjson" to "$ndjson\n$group\n$report", "data/PART_1" to "jpeg bytes").inputStream(),
+                scratch,
+            ) { got += it }
+            assertEquals(2, parsed.messages.size)
+            // The first MMS line names a file that is not in the ZIP and has no text; the report is no message.
+            assertEquals(2, parsed.mms)
+            assertEquals(1, got.size)
+            val m = got.single()
+            assertEquals(1_700_000_200, m.dateSeconds)
+            assertEquals(false, m.read)
+            assertEquals("+4741234567", m.from)
+            assertEquals(listOf("+4790000000"), m.to)
+            assertEquals(listOf("+4791111111"), m.cc)
+            assertEquals("Se her", m.parts.single { it.contentType == "text/plain" }.text)
+            assertEquals("jpeg bytes", m.parts.single { it.contentType == "image/jpeg" }.data?.toString(Charsets.UTF_8))
+            assertEquals("cat.jpg", m.parts.single { it.contentType == "image/jpeg" }.name)
+        } finally {
+            scratch.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun keepsPartFilesInsideItsFolder() {
+        val scratch = java.nio.file.Files.createTempDirectory("import").toFile()
+        try {
+            Importers.parse(
+                ImportSource.SmsImportExport,
+                zip("messages.ndjson" to ndjson, "data/../../escape" to "x", "data/ok" to "y").inputStream(),
+                scratch,
+            ) {}
+            assertEquals(false, java.io.File(scratch.parentFile, "escape").exists())
+            assertEquals(true, java.io.File(scratch, "data/ok").exists())
+        } finally {
+            scratch.deleteRecursively()
+        }
+    }
+
+    @Test
     fun readsPlainJsonLines() {
         val parsed = Importers.parse(ImportSource.SmsImportExport, ndjson.byteInputStream())
         assertEquals(2, parsed.messages.size)

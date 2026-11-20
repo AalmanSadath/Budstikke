@@ -4,6 +4,12 @@ import androidx.core.net.toUri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,13 +61,16 @@ fun BackupSection() {
     var heldPin by remember { mutableStateOf<CharArray?>(null) }
     var pinFor by rememberSaveable { mutableStateOf<PinFor?>(null) }
     var pendingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    // Pictures and attachments go into a backup unless this is unticked; it starts ticked
+    // every time a backup is begun.
+    var withAttachments by rememberSaveable { mutableStateOf(true) }
 
     val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val pin = heldPin
         heldPin = null
         when {
             uri == null -> pin?.fill('\u0000')
-            pin != null -> BackupJobs.backup(context, uri, pin)
+            pin != null -> BackupJobs.backup(context, uri, pin, withAttachments)
             // The screen was rebuilt while the picker was open and the PIN went with it.
             else -> {
                 pendingUri = uri.toString()
@@ -84,7 +93,10 @@ fun BackupSection() {
     }
 
     SectionHeading(stringResource(R.string.settings_backup))
-    LinkRow(stringResource(R.string.backup_messages)) { pinFor = PinFor.Backup }
+    LinkRow(stringResource(R.string.backup_messages)) {
+        withAttachments = true
+        pinFor = PinFor.Backup
+    }
     LinkRow(stringResource(R.string.restore_backup)) {
         openFile.launch(arrayOf("*/*"))
     }
@@ -110,6 +122,8 @@ fun BackupSection() {
             hint = stringResource(R.string.backup_pin_hint),
             confirm = true,
             action = stringResource(if (pinFor == PinFor.Backup) R.string.backup_choose_file else R.string.backup_messages),
+            attachments = withAttachments,
+            onAttachmentsChange = { withAttachments = it },
             onDismiss = {
                 pinFor = null
                 pendingUri = null
@@ -119,7 +133,7 @@ fun BackupSection() {
                 pinFor = null
                 pendingUri = null
                 if (target != null) {
-                    BackupJobs.backup(context, target.toUri(), pin)
+                    BackupJobs.backup(context, target.toUri(), pin, withAttachments)
                 } else {
                     heldPin = pin
                     createFile.launch("Budstikke backup ${SimpleDateFormat("yyyy-MM-dd HHmm", Locale.ROOT).format(Date())}.budstikke")
@@ -156,6 +170,9 @@ private fun PinDialog(
     action: String,
     onDismiss: () -> Unit,
     onDone: (CharArray) -> Unit,
+    /** For a backup: whether pictures and attachments go in it, and a box to change that. */
+    attachments: Boolean? = null,
+    onAttachmentsChange: (Boolean) -> Unit = {},
 ) {
     // Deliberately not saved with the screen's state, which Android may write to disk.
     var pin by remember { mutableStateOf("") }
@@ -199,6 +216,18 @@ private fun PinDialog(
                             null
                         },
                     )
+                }
+                if (attachments != null) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(attachments, role = Role.Checkbox, onValueChange = onAttachmentsChange),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(attachments, onCheckedChange = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.backup_include_attachments))
+                    }
                 }
             }
         },

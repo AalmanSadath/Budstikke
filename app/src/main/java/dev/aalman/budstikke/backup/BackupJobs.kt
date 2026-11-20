@@ -35,8 +35,8 @@ object BackupJobs {
     private val _state = MutableStateFlow<JobState>(JobState.Idle)
     val state: StateFlow<JobState> = _state
 
-    fun backup(context: Context, uri: Uri, pin: CharArray) = run(JobKind.Backup, pin) { progress ->
-        JobState.BackedUp(Backup(context).write(uri, pin, progress))
+    fun backup(context: Context, uri: Uri, pin: CharArray, withAttachments: Boolean) = run(JobKind.Backup, pin) { progress ->
+        JobState.BackedUp(Backup(context).write(uri, pin, withAttachments, progress))
     }
 
     fun restore(context: Context, uri: Uri, pin: CharArray) = run(JobKind.Restore, pin) { progress ->

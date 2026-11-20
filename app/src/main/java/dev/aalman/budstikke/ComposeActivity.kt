@@ -31,7 +31,15 @@ import androidx.compose.ui.unit.sp
 import dev.aalman.budstikke.data.Contact
 import dev.aalman.budstikke.data.ContactMatch
 import dev.aalman.budstikke.data.ContactRepository
+import dev.aalman.budstikke.data.AddressList
 import dev.aalman.budstikke.data.Outgoing
+import dev.aalman.budstikke.sms.MmsImages
+import dev.aalman.budstikke.sms.distinctPeople
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.net.toUri
 import dev.aalman.budstikke.ui.SchedulePicker
 import dev.aalman.budstikke.sms.looksLikeNumber
 import dev.aalman.budstikke.sms.typedRecipient
@@ -77,8 +85,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * A new message: from the new-message button, or from an sms:/smsto: link in another app,
- * which can carry the numbers and a body. Several numbers each get the message on their own,
- * since group messages need MMS.
+ * which can carry the numbers and a body. Several numbers make one group conversation, sent
+ * as MMS, as does a message with pictures.
  */
 class ComposeActivity : ComponentActivity() {
 
@@ -121,6 +129,11 @@ class ComposeActivity : ComponentActivity() {
                     notNumber = false
                 }
                 var body by rememberSaveable { mutableStateOf(initialBody) }
+                // Pictures picked to go with the message, as URIs; with any, it goes as an MMS.
+                var attached by rememberSaveable { mutableStateOf(listOf<String>()) }
+                val pickPhotos = rememberLauncherForActivityResult(
+                    ActivityResultContracts.PickMultipleVisualMedia(MmsImages.MAX_PHOTOS),
+                ) { uris -> attached = (attached + uris.map { it.toString() }).distinct().take(MmsImages.MAX_PHOTOS) }
                 var chosen by rememberSaveable { mutableStateOf<Int?>(null) }
                 val settings by SettingsRepository.get(this).settings.collectAsState()
                 val sim = sims.firstOrNull { it.subscriptionId == chosen }
@@ -136,7 +149,7 @@ class ComposeActivity : ComponentActivity() {
                             notNumber = true
                             null
                         }
-                        recipients.isEmpty() || body.isBlank() -> null
+                        recipients.isEmpty() || (body.isBlank() && attached.isEmpty()) -> null
                         else -> recipients
                     }
                 }
@@ -207,10 +220,13 @@ class ComposeActivity : ComponentActivity() {
                         onSimChange = { chosen = it.subscriptionId },
                         onSend = {
                             val recipients = sendable()
-                            if (recipients != null) send(recipients, body.trim(), subscription)
+                            if (recipients != null) send(recipients, body.trim(), attached, subscription)
                         },
                         modifier = Modifier.navigationBarsPadding(),
                         onSchedule = { if (sendable() != null) scheduling = true },
+                        attachments = attached,
+                        onAttach = { pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        onRemoveAttachment = { uri -> attached = attached - uri },
                     )
                     if (scheduling) {
                         SchedulePicker(
@@ -219,7 +235,7 @@ class ComposeActivity : ComponentActivity() {
                             onPick = { millis ->
                                 scheduling = false
                                 val recipients = sendable()
-                                if (recipients != null) send(recipients, body.trim(), subscription, at = millis)
+                                if (recipients != null) send(recipients, body.trim(), attached, subscription, at = millis)
                             },
                         )
                     }
@@ -233,31 +249,39 @@ class ComposeActivity : ComponentActivity() {
         const val SUGGEST_DELAY_MILLIS = 100L
     }
 
-    /** Sends [text] to each recipient now, or schedules it for [at] when that is given. */
-    private fun send(recipients: List<String>, text: String, subscriptionId: Int, at: Long? = null) {
+    /** Set while a message is being got ready, so a second tap does not send it twice. */
+    private var sending = false
+
+    /**
+     * Sends [text] and the pictures at [photos] now, or schedules them for [at] when that is
+     * given, then opens the conversation. Several recipients share one group conversation.
+     * When a picture cannot be read or made small enough, says so and stays on this screen.
+     */
+    private fun send(recipients: List<String>, text: String, photos: List<String>, subscriptionId: Int, at: Long? = null) {
+        if (sending) return
+        sending = true
         lifecycleScope.launch {
-            val thread = withContext(Dispatchers.IO) {
-                // Each recipient gets their own conversation, which shows the send delay's
-                // countdown or the scheduled message.
-                val outgoing = Outgoing.get(this@ComposeActivity)
-                recipients.forEach { recipient ->
-                    val thread = Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, recipient)
-                    if (at == null) {
-                        OutgoingQueue.sendOrHold(this@ComposeActivity, thread, recipient, text, subscriptionId)
-                    } else {
-                        outgoing.add(thread, recipient, text, subscriptionId, at, delayed = false)
-                    }
-                }
-                recipients.singleOrNull()?.let { Telephony.Threads.getOrCreateThreadId(this@ComposeActivity, it) }
+            val app = this@ComposeActivity
+            val images = if (photos.isEmpty()) emptyList() else withContext(Dispatchers.IO) {
+                MmsImages.prepare(app, photos.map { it.toUri() }, text, subscriptionId)
             }
-            startActivity(
-                if (thread != null) {
-                    MainActivity.openConversation(this@ComposeActivity, thread, recipients.single())
+            if (images == null) {
+                sending = false
+                Toast.makeText(app, R.string.attach_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val people = distinctPeople(recipients)
+            val thread = withContext(Dispatchers.IO) {
+                // The conversation shows the send delay's countdown or the scheduled message.
+                val thread = Telephony.Threads.getOrCreateThreadId(app, people.toSet())
+                if (at == null) {
+                    OutgoingQueue.sendOrHold(app, thread, people, text, subscriptionId, images)
                 } else {
-                    Intent(this@ComposeActivity, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                },
-            )
+                    Outgoing.get(app).add(thread, people, text, subscriptionId, at, delayed = false, images = images)
+                }
+                thread
+            }
+            startActivity(MainActivity.openConversation(app, thread, AddressList.join(people)))
             finish()
         }
     }

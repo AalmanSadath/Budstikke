@@ -1,20 +1,29 @@
 package dev.aalman.budstikke.sms
 
+import dev.aalman.budstikke.data.AttachmentKind
 import dev.aalman.budstikke.data.Message
 import dev.aalman.budstikke.data.MessageState
 
 /** The emoji offered when a message is long-pressed, in the order the bar shows them. */
 val REACTION_EMOJI = listOf("👍", "😂", "❤️", "🔥", "😢", "😮", "🙏", "🎉")
 
-/** A reaction sent as a text message: [emoji] put on, or taken off, the message quoted. */
+/**
+ * A reaction sent as a text message: [emoji] put on, or taken off, the message quoted. A
+ * reaction to a picture quotes no text; its [quote] is [IMAGE_QUOTE].
+ */
 data class ReactionText(val emoji: String, val quote: String, val removed: Boolean)
+
+/** Stands for "an image" in a reaction to a picture; no text quotes it. */
+const val IMAGE_QUOTE = "\u0000image"
 
 /**
  * The SMS that tells the other phone about a reaction, in the wording Google Messages uses
  * with phones that do not have RCS: `Reacted 👍 to "…"`, or `Removed 👍 from "…"`. Long
  * messages are quoted by their start, so the reaction stays one SMS.
  */
-fun reactionText(emoji: String, body: String, removed: Boolean): String {
+fun reactionText(emoji: String, body: String, removed: Boolean, image: Boolean = false): String {
+    // A picture without text is named as Google Messages names it: `Reacted 👍 to an image`.
+    if (image && body.isBlank()) return if (removed) "Removed $emoji from an image" else "Reacted $emoji to an image"
     val quote = quoteOf(body)
     return if (removed) "Removed $emoji from \"$quote\"" else "Reacted $emoji to \"$quote\""
 }
@@ -31,6 +40,8 @@ private const val QUOTE_LENGTH = 40
 
 private fun flatten(text: String) = text.replace(Regex("\\s+"), " ").trim()
 
+private val GOOGLE_IMAGE = Regex("""^(Reacted|Removed) (\S+) (to|from) an image$""")
+private val APPLE_IMAGE = Regex("""^(Liked|Loved|Disliked|Laughed at|Emphasized|Questioned) an image$""")
 private val GOOGLE = Regex("""^(Reacted|Removed) (\S+) (to|from) ["“](.*)["”]$""", RegexOption.DOT_MATCHES_ALL)
 private val APPLE = Regex(
     """^(Liked|Loved|Disliked|Laughed at|Emphasized|Questioned) ["“](.*)["”]$""",
@@ -57,6 +68,15 @@ private val APPLE_EMOJI = mapOf(
  */
 fun parseReaction(body: String): ReactionText? {
     val text = body.trim()
+    GOOGLE_IMAGE.matchEntire(text)?.let { m ->
+        val (verb, emoji, preposition) = m.destructured
+        val removed = verb == "Removed"
+        if (removed != (preposition == "from")) return null
+        return ReactionText(emoji, IMAGE_QUOTE, removed)
+    }
+    APPLE_IMAGE.matchEntire(text)?.let { m ->
+        return ReactionText(APPLE_EMOJI.getValue(m.groupValues[1]), IMAGE_QUOTE, removed = false)
+    }
     GOOGLE.matchEntire(text)?.let { m ->
         val (verb, emoji, preposition, quote) = m.destructured
         val removed = verb == "Removed"
@@ -109,7 +129,13 @@ fun foldReactions(messages: List<Message>): FoldedMessages {
     val carriers = HashMap<Long, MutableList<Long>>()
     for (message in messages) {
         val reaction = if (message.state == MessageState.Failed) null else parseReaction(message.body)
-        val target = reaction?.let { r -> shown.lastOrNull { quotes(r.quote, it.body) } }
+        val target = reaction?.let { r ->
+            if (r.quote == IMAGE_QUOTE) {
+                shown.lastOrNull { m -> m.attachments.any { it.kind == AttachmentKind.Image } }
+            } else {
+                shown.lastOrNull { quotes(r.quote, it.body) }
+            }
+        }
         if (reaction == null || target == null) {
             shown += message
             continue

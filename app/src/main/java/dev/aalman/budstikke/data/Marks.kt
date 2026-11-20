@@ -31,9 +31,9 @@ data class StarredMessage(
 }
 
 /**
- * Reactions and stars put on single messages. Both are keyed by the system store's SMS id,
- * so the trash keeps them with a deleted message's copy and sets them again on the id it
- * gets back when restored.
+ * Reactions and stars put on single messages. Both are keyed by [MessageKey] (an SMS's id,
+ * or an MMS's negated), so the trash keeps them with a deleted message's copy and sets them
+ * again on the id it gets back when restored.
  */
 class Marks private constructor(context: Context) {
 
@@ -140,6 +140,27 @@ class Marks private constructor(context: Context) {
                         body = c.getString(3).orEmpty(),
                         dateMillis = c.getLong(4),
                         fromMe = c.getInt(5) != Telephony.Sms.MESSAGE_TYPE_INBOX,
+                        contact = contacts.lookup(address),
+                    )
+                }
+            }
+        }
+        // Starred MMS, by their negative keys: text from their parts, address from who sent it.
+        val mmsKeys = order.filter(MessageKey::isMms)
+        if (mmsKeys.isNotEmpty()) {
+            val reader = MmsReader(resolver)
+            val recipients by lazy { reader.threadRecipients() }
+            mmsKeys.map(MessageKey::mmsRowId).chunked(500).forEach { chunk ->
+                reader.summaries("${Telephony.Mms._ID} IN (${chunk.joinToString(",")})").forEach { m ->
+                    val rowId = MessageKey.mmsRowId(m.key)
+                    val address = (if (m.inbox) reader.sender(rowId) else null) ?: recipients[m.threadId]?.firstOrNull().orEmpty()
+                    found[m.key] = StarredMessage(
+                        id = m.key,
+                        threadId = m.threadId,
+                        address = address,
+                        body = m.text,
+                        dateMillis = m.dateMillis,
+                        fromMe = !m.inbox,
                         contact = contacts.lookup(address),
                     )
                 }

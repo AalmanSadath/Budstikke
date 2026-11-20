@@ -1,5 +1,6 @@
 package dev.aalman.budstikke.sms
 
+import dev.aalman.budstikke.data.Attachment
 import dev.aalman.budstikke.data.Message
 import dev.aalman.budstikke.data.MessageState
 import org.junit.Assert.assertEquals
@@ -128,5 +129,28 @@ class ReactionTextTest {
         assertFalse(canSendReactionTo("BANK"))
         assertFalse(canSendReactionTo("12345"))
         assertFalse(canSendReactionTo("2210"))
+    }
+
+    @Test
+    fun picturesAreReactedToAsAnImage() {
+        assertEquals("Reacted 👍 to an image", reactionText("👍", "", removed = false, image = true))
+        assertEquals("Removed 👍 from an image", reactionText("👍", " ", removed = true, image = true))
+        // A picture with text is quoted by its text, as any message.
+        assertEquals("Reacted 👍 to \"Look\"", reactionText("👍", "Look", removed = false, image = true))
+        assertEquals(ReactionText("❤️", IMAGE_QUOTE, false), parseReaction("Reacted ❤️ to an image"))
+        assertEquals(ReactionText("👍", IMAGE_QUOTE, true), parseReaction("Removed 👍 from an image"))
+        assertEquals(ReactionText("😂", IMAGE_QUOTE, false), parseReaction("Laughed at an image"))
+    }
+
+    @Test
+    fun aReactionToAnImageFoldsIntoTheNewestPicture() {
+        val photo = Attachment("content://mms/part/1", "image/jpeg", null)
+        val older = Message(-1, "", 1000, MessageState.Received, 1, attachments = listOf(photo))
+        val newer = Message(-2, "", 2000, MessageState.Received, 1, attachments = listOf(photo))
+        val text = received(3, "Nice")
+        val reaction = received(4, "Loved an image")
+        val folded = foldReactions(listOf(older, newer, text, reaction))
+        assertEquals(listOf(-1L, -2L, 3L), folded.shown.map { it.id })
+        assertEquals("❤️", folded.theirs[-2L])
     }
 }
