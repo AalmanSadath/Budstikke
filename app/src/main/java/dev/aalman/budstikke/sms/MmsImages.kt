@@ -44,6 +44,17 @@ data class MmsLimits(val maxMessageBytes: Int, val maxWidth: Int, val maxHeight:
     }
 }
 
+/**
+ * The size to decode a [width] by [height] picture at so its longer side is at most
+ * [maxSide], keeping its shape, or null when it already fits.
+ */
+fun fitWithin(width: Int, height: Int, maxSide: Int): Pair<Int, Int>? {
+    val longest = maxOf(width, height)
+    if (longest <= maxSide) return null
+    val scale = maxSide.toFloat() / longest
+    return maxOf(1, (width * scale).toInt()) to maxOf(1, (height * scale).toInt())
+}
+
 /** One attempt at fitting a picture: its longest side in pixels and its JPEG quality. */
 data class ShrinkStep(val longestSide: Int, val quality: Int)
 
@@ -123,13 +134,7 @@ object MmsImages {
     /** Decodes at most [longestSide] on the longer edge, set before any pixels are read. */
     private fun decode(context: Context, uri: Uri, longestSide: Int): Bitmap? = runCatching {
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
-            val w = info.size.width
-            val h = info.size.height
-            val longest = maxOf(w, h)
-            if (longest > longestSide) {
-                val scale = longestSide.toFloat() / longest
-                decoder.setTargetSize(maxOf(1, (w * scale).toInt()), maxOf(1, (h * scale).toInt()))
-            }
+            fitWithin(info.size.width, info.size.height, longestSide)?.let { (w, h) -> decoder.setTargetSize(w, h) }
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
     }.getOrNull()

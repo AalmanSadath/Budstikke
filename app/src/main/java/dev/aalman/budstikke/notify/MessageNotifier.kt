@@ -18,6 +18,7 @@ import androidx.core.net.toUri
 import dev.aalman.budstikke.MainActivity
 import dev.aalman.budstikke.R
 import dev.aalman.budstikke.data.AddressList
+import dev.aalman.budstikke.data.AttachmentKind
 import dev.aalman.budstikke.data.ContactRepository
 import dev.aalman.budstikke.data.Member
 import dev.aalman.budstikke.data.membersTitle
@@ -71,23 +72,45 @@ class MessageNotifier(context: Context) {
                 .build()
         }
         val me = Person.Builder().setName(context.getString(R.string.notification_you)).build()
-        val style = NotificationCompat.MessagingStyle(me)
-        if (group) {
-            style.isGroupConversation = true
-            style.conversationTitle = membersTitle(addresses.map { Member(it, contacts.lookup(it)) })
-        }
-        // A locked conversation's or message's text stays off the lock screen and the shade.
+        val title = if (group) membersTitle(addresses.map { Member(it, contacts.lookup(it)) }) else null
+        // A locked conversation's or message's text stays off the lock screen and the shade,
+        // and so does its picture.
         val locks = Locks.get(context).state()
         val lockedText = context.getString(R.string.locked_message)
-        unread.forEach {
-            val body = if (locks.isLocked(threadId, it.id)) lockedText else it.body
-            style.addMessage(body, it.dateMillis, personFor(it.address.ifEmpty { addresses.first() }))
+        val photoLabel = context.getString(R.string.attachment_photo)
+        // A received picture shows in the notification, scaled down; never a locked one.
+        val pictures = unread.filter { it.image && !locks.isLocked(threadId, it.id) }.mapNotNull { m ->
+            val rowId = MessageKey.mmsRowId(m.id)
+            reader.firstImage(rowId)?.let { NotificationImages.forMessage(context, threadId, rowId, it) }?.let { m.id to it }
+        }.toMap()
+        NotificationImages.keepOnly(context, threadId, pictures.keys.mapTo(HashSet(), MessageKey::mmsRowId))
+        // MessagingStyle has an apply() of its own, so this builds it with also.
+        fun style(withPictures: Boolean) = NotificationCompat.MessagingStyle(me).also { style ->
+            if (title != null) {
+                style.isGroupConversation = true
+                style.conversationTitle = title
+            }
+            unread.forEach {
+                val body = if (locks.isLocked(threadId, it.id)) lockedText else it.body
+                val sender = personFor(it.address.ifEmpty { addresses.first() })
+                val picture = if (withPictures) pictures[it.id] else null
+                if (picture != null) {
+                    // Android shows a message with a picture as the picture alone, so its
+                    // text follows as a message of its own.
+                    style.addMessage(
+                        NotificationCompat.MessagingStyle.Message(photoLabel, it.dateMillis, sender).setData("image/jpeg", picture),
+                    )
+                    if (it.hasText) style.addMessage(body, it.dateMillis, sender)
+                } else {
+                    style.addMessage(body, it.dateMillis, sender)
+                }
+            }
         }
         val address = AddressList.join(addresses)
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setStyle(style)
+            .setStyle(style(withPictures = true))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setWhen(unread.last().dateMillis)
@@ -106,12 +129,26 @@ class MessageNotifier(context: Context) {
             builder.addAction(replyAction(threadId, address))
             builder.addAction(markReadAction(threadId))
         }
+        // On a lock screen that hides private content the text-only version stands in,
+        // with no pictures.
+        if (pictures.isNotEmpty()) {
+            builder.setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setStyle(style(withPictures = false))
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .setWhen(unread.last().dateMillis)
+                    .setShowWhen(true)
+                    .build(),
+            )
+        }
         val notification = builder.build()
         manager.notify(notificationId(threadId), notification)
     }
 
     fun cancel(threadId: Long) {
         manager.cancel(notificationId(threadId))
+        NotificationImages.clear(context, threadId)
     }
 
     /**
@@ -203,7 +240,16 @@ class MessageNotifier(context: Context) {
             .setClass(context, NotificationActionReceiver::class.java)
             .putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, threadId)
 
-    private data class Unread(val id: Long, val address: String, val body: String, val dateMillis: Long)
+    private data class Unread(
+        val id: Long,
+        val address: String,
+        val body: String,
+        val dateMillis: Long,
+        /** An MMS whose first attachment is a picture. */
+        val image: Boolean = false,
+        /** Whether [body] is the message's own text, rather than what it carries. */
+        val hasText: Boolean = true,
+    )
 
     /** The thread's unread received messages, oldest first, at most the last [MAX_LINES]. */
     private fun unreadMessages(threadId: Long): List<Unread> {
@@ -230,7 +276,11 @@ class MessageNotifier(context: Context) {
                 m.text.isNotEmpty() -> m.text
                 else -> context.getString(attachmentLabel(m.attachment))
             }
-            Unread(m.key, reader.sender(MessageKey.mmsRowId(m.key)) ?: rows.firstOrNull()?.address.orEmpty(), body, m.dateMillis)
+            Unread(
+                m.key, reader.sender(MessageKey.mmsRowId(m.key)) ?: rows.firstOrNull()?.address.orEmpty(), body, m.dateMillis,
+                image = !m.waiting && m.attachment == AttachmentKind.Image,
+                hasText = !m.waiting && m.text.isNotEmpty(),
+            )
         }
         return (rows + mms).sortedBy { it.dateMillis }.takeLast(MAX_LINES)
     }

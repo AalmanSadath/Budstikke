@@ -59,6 +59,7 @@ import dev.aalman.budstikke.data.AttachmentKind
 import dev.aalman.budstikke.data.DownloadState
 import dev.aalman.budstikke.data.WaitingMms
 import dev.aalman.budstikke.data.attachmentLabel
+import dev.aalman.budstikke.sms.fitWithin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -218,13 +219,7 @@ internal fun rememberDecoded(uri: Uri, maxPx: Int): ImageBitmap? {
             runCatching {
                 val source = ImageDecoder.createSource(context.contentResolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                    val w = info.size.width
-                    val h = info.size.height
-                    val longest = maxOf(w, h)
-                    if (longest > maxPx) {
-                        val scale = maxPx.toFloat() / longest
-                        decoder.setTargetSize(maxOf(1, (w * scale).toInt()), maxOf(1, (h * scale).toInt()))
-                    }
+                    fitWithin(info.size.width, info.size.height, maxPx)?.let { (w, h) -> decoder.setTargetSize(w, h) }
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 }.asImageBitmap()
             }.getOrNull()

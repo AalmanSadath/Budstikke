@@ -164,6 +164,13 @@ internal class MmsReader(private val resolver: ContentResolver) {
         return ids.mapNotNull { byId[it]?.takeIf(String::isNotBlank) }
     }
 
+    /** The first picture of the MMS with row [rowId], or null when it has none. */
+    fun firstImage(rowId: Long): Uri? = resolver.query(
+        Mms.Part.CONTENT_URI, arrayOf(Mms.Part._ID),
+        "${Mms.Part.MSG_ID} = ? AND ${Mms.Part.CONTENT_TYPE} LIKE 'image/%'", arrayOf(rowId.toString()),
+        "${Mms.Part.SEQ} ASC",
+    )?.use { c -> if (c.moveToFirst()) "content://mms/part/${c.getLong(0)}".toUri() else null }
+
     /** Who sent the MMS with row [rowId], or null for none on record. */
     fun sender(rowId: Long): String? = resolver.query(
         "content://mms/$rowId/addr".toUri(), arrayOf(Mms.Addr.ADDRESS),

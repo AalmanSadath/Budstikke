@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- What the app's FileProvider can hand out, each through a temporary grant on one URI:
-     MMS files for Android's MMS service, and attachment copies for the app that opens one. -->
+     MMS files for Android's MMS service, attachment copies for the app that opens one, and
+     scaled pictures for message notifications, which Android lets its system UI read. -->
 <paths>
     <cache-path name="mms" path="mms/" />
     <cache-path name="share" path="share/" />
+    <cache-path name="notify" path="notify/" />
 </paths>

@@ -6,6 +6,7 @@ import dev.aalman.budstikke.data.Trash
 import dev.aalman.budstikke.lock.LockSession
 import dev.aalman.budstikke.sms.OutgoingQueue
 import dev.aalman.budstikke.trash.schedulePurge
+import dev.aalman.budstikke.notify.NotificationImages
 import kotlin.concurrent.thread
 
 class BudstikkeApp : Application() {
@@ -22,6 +23,7 @@ class BudstikkeApp : Application() {
             runCatching { Trash.get(this).purgeExpired() }
             runCatching { OutgoingQueue.sendDue(this) }
             runCatching { Outgoing.get(this).sweepFiles() }
+            runCatching { NotificationImages.sweep(this) }
         }
     }
 }
