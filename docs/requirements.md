@@ -302,3 +302,16 @@ A single "Accessibility mode" switch in settings, with its parts adjustable.
       pictures, in the right conversations and with the right dates.
 - [x] Only plain file names from the `.zip` are used, so nothing is written outside the app's
       own scratch folder, and that folder is removed afterwards.
+
+## R32. Links in messages
+
+- [ ] Web addresses (with `http://`, `https://` or `www.`, or bare with a known ending such as
+      `posten.no/track`), email addresses and phone numbers in a message are underlined.
+      File names, dates, amounts and one-time codes are not.
+- [ ] Tapping a web address shows the whole address, with the site it goes to in bold, and
+      offers Open, Copy and Cancel; Open shows it in the browser.
+- [ ] Tapping an email address starts an email to it; tapping a phone number opens the dialer
+      with it, without calling.
+- [ ] A locked message shows no links until it is unlocked, and while selecting, a tap on a
+      link selects the message instead.
+- [ ] TalkBack offers each link as an action on its message.

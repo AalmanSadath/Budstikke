@@ -38,6 +38,8 @@ the same service the phone's built-in messaging app uses.
 - React to messages with an emoji. Reactions from Google Messages and iPhones show on the
   message they react to instead of as separate texts.
 - Star messages to find them later, and copy or forward them.
+- Web addresses, email addresses and phone numbers in messages can be tapped. A web link
+  shows its full address, with the site it really goes to in bold, before it opens.
 
 ### Privacy
 - No internet permission, so the app cannot send your messages anywhere. MMS are sent and
